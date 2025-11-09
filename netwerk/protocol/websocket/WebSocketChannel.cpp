@@ -38,6 +38,7 @@
 #include "nsIObserverService.h"
 #include "nsCharSeparatedTokenizer.h"
 
+#include "nsComponentManagerUtils.h"
 #include "nsNetCID.h"
 #include "nsServiceManagerUtils.h"
 #include "nsCRT.h"
@@ -1159,12 +1160,15 @@ WebSocketChannel::~WebSocketChannel() {
   free(mDynamicOutput);
   delete mCurrentOut;
 
-  while ((mCurrentOut = (OutboundMessage*)mOutgoingPingMessages.PopFront()))
+  while ((mCurrentOut = mOutgoingPingMessages.PopFront())) {
     delete mCurrentOut;
-  while ((mCurrentOut = (OutboundMessage*)mOutgoingPongMessages.PopFront()))
+  }
+  while ((mCurrentOut = mOutgoingPongMessages.PopFront())) {
     delete mCurrentOut;
-  while ((mCurrentOut = (OutboundMessage*)mOutgoingMessages.PopFront()))
+  }
+  while ((mCurrentOut = mOutgoingMessages.PopFront())) {
     delete mCurrentOut;
+  }
 
   mListenerMT = nullptr;
 
@@ -1888,7 +1892,7 @@ void WebSocketChannel::GeneratePong(uint8_t* payload, uint32_t len) {
                          new OutboundMessage(kMsgTypePong, buf));
 }
 
-void WebSocketChannel::EnqueueOutgoingMessage(nsDeque& aQueue,
+void WebSocketChannel::EnqueueOutgoingMessage(nsDeque<OutboundMessage>& aQueue,
                                               OutboundMessage* aMsg) {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
 
@@ -1924,16 +1928,16 @@ void WebSocketChannel::PrimeNewOutgoingMessage() {
 
   nsresult rv = NS_OK;
 
-  mCurrentOut = (OutboundMessage*)mOutgoingPongMessages.PopFront();
+  mCurrentOut = mOutgoingPongMessages.PopFront();
   if (mCurrentOut) {
     MOZ_ASSERT(mCurrentOut->GetMsgType() == kMsgTypePong, "Not pong message!");
   } else {
-    mCurrentOut = (OutboundMessage*)mOutgoingPingMessages.PopFront();
+    mCurrentOut = mOutgoingPingMessages.PopFront();
     if (mCurrentOut)
       MOZ_ASSERT(mCurrentOut->GetMsgType() == kMsgTypePing,
                  "Not ping message!");
     else
-      mCurrentOut = (OutboundMessage*)mOutgoingMessages.PopFront();
+      mCurrentOut = mOutgoingMessages.PopFront();
   }
 
   if (!mCurrentOut) return;
@@ -2638,16 +2642,16 @@ void ProcessServerWebSocketExtensions(const nsACString& aExtensions,
     }
   }
 
-  nsCCharSeparatedTokenizer extList(aExtensions, ',');
-  while (extList.hasMoreTokens()) {
+  for (const auto& ext :
+       nsCCharSeparatedTokenizer(aExtensions, ',').ToRange()) {
     bool clientNoContextTakeover;
     bool serverNoContextTakeover;
     int32_t clientMaxWindowBits;
     int32_t serverMaxWindowBits;
 
     nsresult rv = ParseWebSocketExtension(
-        extList.nextToken(), eParseServerSide, clientNoContextTakeover,
-        serverNoContextTakeover, clientMaxWindowBits, serverMaxWindowBits);
+        ext, eParseServerSide, clientNoContextTakeover, serverNoContextTakeover,
+        clientMaxWindowBits, serverMaxWindowBits);
     if (NS_FAILED(rv)) {
       // Ignore extensions that we can't parse
       continue;
@@ -2742,7 +2746,7 @@ nsresult WebSocketChannel::SetupRequest() {
 
   rv = mRandomGenerator->GenerateRandomBytes(16, &secKey);
   NS_ENSURE_SUCCESS(rv, rv);
-  rv = Base64Encode(nsDependentCSubstring((char*)secKey, 16), secKeyString);
+  rv = Base64Encode(reinterpret_cast<const char*>(secKey), 16, secKeyString);
   free(secKey);
   if (NS_FAILED(rv)) {
     return rv;
@@ -2951,13 +2955,6 @@ WebSocketChannel::OnLookupComplete(nsICancelable* aRequest,
   LOG(("WebSocket OnLookupComplete: Proceeding to ConditionallyConnect\n"));
   nsWSAdmissionManager::ConditionallyConnect(this);
 
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-WebSocketChannel::OnLookupByTypeComplete(nsICancelable* aRequest,
-                                         nsIDNSByTypeRecord* aRes,
-                                         nsresult aStatus) {
   return NS_OK;
 }
 
@@ -3745,8 +3742,14 @@ WebSocketChannel::OnStartRequest(nsIRequest* aRequest) {
            "HTTP response header Sec-WebSocket-Accept check failed\n"));
       LOG(("WebSocketChannel::OnStartRequest: Expected %s received %s\n",
            mHashedSecret.get(), respAccept.get()));
-      AbortSession(NS_ERROR_ILLEGAL_VALUE);
-      return NS_ERROR_ILLEGAL_VALUE;
+#ifdef FUZZING
+      if (NS_FAILED(rv) || respAccept.IsEmpty()) {
+#endif
+        AbortSession(NS_ERROR_ILLEGAL_VALUE);
+        return NS_ERROR_ILLEGAL_VALUE;
+#ifdef FUZZING
+      }
+#endif
     }
   }
 

@@ -52,14 +52,17 @@
 #include "nsRFPService.h"
 #include "mozilla/net/rust_helper.h"
 
+#include "mozilla/net/HttpConnectionMgrParent.h"
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/net/NeckoParent.h"
 #include "mozilla/net/RequestContextService.h"
+#include "mozilla/net/SocketProcessParent.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/Unused.h"
 #include "mozilla/AntiTrackingCommon.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/LazyIdleThread.h"
+#include "mozilla/SyncRunnable.h"
 
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/Navigator.h"
@@ -67,6 +70,7 @@
 #include "mozilla/dom/network/Connection.h"
 
 #include "nsNSSComponent.h"
+#include "TRRServiceChannel.h"
 
 #if defined(XP_UNIX)
 #  include <sys/utsname.h>
@@ -80,10 +84,6 @@
 #if defined(XP_MACOSX)
 #  include <CoreServices/CoreServices.h>
 #  include "nsCocoaFeatures.h"
-#endif
-
-#ifdef MOZ_TASK_TRACER
-#  include "GeckoTaskTracer.h"
 #endif
 
 //-----------------------------------------------------------------------------
@@ -127,8 +127,7 @@
 
 using mozilla::dom::Promise;
 
-namespace mozilla {
-namespace net {
+namespace mozilla::net {
 
 LazyLogModule gHttpLog("nsHttp");
 
@@ -283,8 +282,7 @@ nsHttpHandler::nsHttpHandler()
       mNextChannelId(1),
       mLastActiveTabLoadOptimizationLock(
           "nsHttpConnectionMgr::LastActiveTabLoadOptimization"),
-      mSpdyBlacklistLock(
-          "nsHttpHandler::SpdyBlacklist"),
+      mSpdyBlacklistLock("nsHttpHandler::SpdyBlacklist"),
       mThroughCaptivePortal(false) {
   LOG(("Creating nsHttpHandler [this=%p].\n", this));
 
@@ -370,24 +368,6 @@ void nsHttpHandler::SetFastOpenOSSupport() {
 #endif
   LOG(("nsHttpHandler::SetFastOpenOSSupport %s supported.\n",
        mFastOpenSupported ? "" : "not"));
-}
-
-void nsHttpHandler::EnsureUAOverridesInit() {
-  MOZ_ASSERT(XRE_IsParentProcess());
-  MOZ_ASSERT(NS_IsMainThread());
-
-  static bool initDone = false;
-
-  if (initDone) {
-    return;
-  }
-
-  nsresult rv;
-  nsCOMPtr<nsISupports> bootstrapper =
-      do_GetService("@mozilla.org/network/ua-overrides-bootstrapper;1", &rv);
-  MOZ_ASSERT(bootstrapper);
-  MOZ_ASSERT(NS_SUCCEEDED(rv));
-  initDone = true;
 }
 
 nsHttpHandler::~nsHttpHandler() {
@@ -492,6 +472,8 @@ nsresult nsHttpHandler::Init() {
   rv = InitConnectionMgr();
   if (NS_FAILED(rv)) return rv;
 
+  mAltSvcCache = MakeUnique<AltSvcCache>();
+
   mRequestContextService = RequestContextService::GetOrCreate();
 
 #if defined(ANDROID)
@@ -591,19 +573,35 @@ nsresult nsHttpHandler::InitConnectionMgr() {
     return NS_OK;
   }
 
-  nsresult rv;
+  if (mConnMgr) {
+    return NS_OK;
+  }
 
-  if (!mConnMgr) {
+  if (gIOService->UseSocketProcess() && XRE_IsParentProcess()) {
+    if (!gIOService->SocketProcessReady()) {
+      gIOService->CallOrWaitForSocketProcess(
+          []() { Unused << gHttpHandler->InitConnectionMgr(); });
+      return NS_OK;
+    }
+
+    RefPtr<HttpConnectionMgrParent> connMgr = new HttpConnectionMgrParent();
+    if (!SocketProcessParent::GetSingleton()->SendPHttpConnectionMgrConstructor(
+            connMgr)) {
+      return NS_ERROR_FAILURE;
+    }
+
+    mConnMgr = connMgr;
+  } else {
+    MOZ_ASSERT(XRE_IsSocketProcess() || !gIOService->UseSocketProcess());
     mConnMgr = new nsHttpConnectionMgr();
   }
 
-  rv = mConnMgr->Init(
+  return mConnMgr->Init(
       mMaxUrgentExcessiveConns, mMaxConnections,
       mMaxPersistentConnectionsPerServer, mMaxPersistentConnectionsPerProxy,
       mMaxRequestDelay, mThrottleEnabled, mThrottleVersion, mThrottleSuspendFor,
       mThrottleResumeFor, mThrottleReadLimit, mThrottleReadInterval,
       mThrottleHoldTime, mThrottleMaxTime, mBeConservativeForProxy);
-  return rv;
 }
 
 nsresult nsHttpHandler::AddStandardRequestHeaders(
@@ -1951,6 +1949,23 @@ static nsresult PrepareAcceptLanguages(const char* i_AcceptLanguages,
 }
 
 nsresult nsHttpHandler::SetAcceptLanguages() {
+  if (!NS_IsMainThread()) {
+    nsCOMPtr<nsIThread> mainThread;
+    nsresult rv = NS_GetMainThread(getter_AddRefs(mainThread));
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+
+    // Forward to the main thread synchronously.
+    SyncRunnable::DispatchToThread(
+        mainThread, new SyncRunnable(NS_NewRunnableFunction(
+                        "nsHttpHandler::SetAcceptLanguages",
+                        [&rv]() { rv = gHttpHandler->SetAcceptLanguages(); })));
+    return rv;
+  }
+
+  MOZ_ASSERT(NS_IsMainThread());
+
   mAcceptLanguagesIsDirty = false;
 
   nsAutoCString acceptLanguages;
@@ -2037,21 +2052,11 @@ nsHttpHandler::AllowPort(int32_t port, const char* scheme, bool* _retval) {
 // nsHttpHandler::nsIProxiedProtocolHandler
 //-----------------------------------------------------------------------------
 
-NS_IMETHODIMP
-nsHttpHandler::NewProxiedChannel(nsIURI* uri, nsIProxyInfo* givenProxyInfo,
-                                 uint32_t proxyResolveFlags, nsIURI* proxyURI,
-                                 nsILoadInfo* aLoadInfo, nsIChannel** result) {
-  RefPtr<HttpBaseChannel> httpChannel;
-
-  LOG(("nsHttpHandler::NewProxiedChannel [proxyInfo=%p]\n", givenProxyInfo));
-
-#ifdef MOZ_TASK_TRACER
-  if (tasktracer::IsStartLogging()) {
-    nsAutoCString urispec;
-    uri->GetSpec(urispec);
-    tasktracer::AddLabel("nsHttpHandler::NewProxiedChannel2 %s", urispec.get());
-  }
-#endif
+nsresult nsHttpHandler::SetupChannelInternal(
+    HttpBaseChannel* aChannel, nsIURI* uri, nsIProxyInfo* givenProxyInfo,
+    uint32_t proxyResolveFlags, nsIURI* proxyURI, nsILoadInfo* aLoadInfo,
+    nsIChannel** result) {
+  RefPtr<HttpBaseChannel> httpChannel = aChannel;
 
   nsCOMPtr<nsProxyInfo> proxyInfo;
   if (givenProxyInfo) {
@@ -2059,23 +2064,7 @@ nsHttpHandler::NewProxiedChannel(nsIURI* uri, nsIProxyInfo* givenProxyInfo,
     NS_ENSURE_ARG(proxyInfo);
   }
 
-  if (IsNeckoChild()) {
-    httpChannel = new HttpChannelChild();
-  } else {
-    httpChannel = new nsHttpChannel();
-  }
-
   uint32_t caps = mCapabilities;
-
-  if (!IsNeckoChild()) {
-    // HACK: make sure PSM gets initialized on the main thread.
-    net_EnsurePSMInit();
-  }
-
-  if (XRE_IsParentProcess()) {
-    // Load UserAgentOverrides.jsm before any HTTP request is issued.
-    EnsureUAOverridesInit();
-  }
 
   uint64_t channelId;
   nsresult rv = NewChannelId(channelId);
@@ -2085,14 +2074,49 @@ nsHttpHandler::NewProxiedChannel(nsIURI* uri, nsIProxyInfo* givenProxyInfo,
                          channelId, aLoadInfo->GetExternalContentPolicyType());
   if (NS_FAILED(rv)) return rv;
 
-  // set the loadInfo on the new channel
-  rv = httpChannel->SetLoadInfo(aLoadInfo);
-  if (NS_FAILED(rv)) {
-    return rv;
+  // TRRServiceChannel doesn't need loadInfo.
+  if (aLoadInfo) {
+    // set the loadInfo on the new channel
+    rv = httpChannel->SetLoadInfo(aLoadInfo);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
   }
 
   httpChannel.forget(result);
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsHttpHandler::NewProxiedChannel(nsIURI* uri, nsIProxyInfo* givenProxyInfo,
+                                 uint32_t proxyResolveFlags, nsIURI* proxyURI,
+                                 nsILoadInfo* aLoadInfo, nsIChannel** result) {
+  HttpBaseChannel* httpChannel;
+
+  LOG(("nsHttpHandler::NewProxiedChannel [proxyInfo=%p]\n", givenProxyInfo));
+
+  if (IsNeckoChild()) {
+    httpChannel = new HttpChannelChild();
+  } else {
+    // HACK: make sure PSM gets initialized on the main thread.
+    net_EnsurePSMInit();
+    httpChannel = new nsHttpChannel();
+  }
+
+  return SetupChannelInternal(httpChannel, uri, givenProxyInfo,
+                              proxyResolveFlags, proxyURI, aLoadInfo, result);
+}
+
+nsresult nsHttpHandler::CreateTRRServiceChannel(
+    nsIURI* uri, nsIProxyInfo* givenProxyInfo, uint32_t proxyResolveFlags,
+    nsIURI* proxyURI, nsILoadInfo* aLoadInfo, nsIChannel** result) {
+  HttpBaseChannel* httpChannel = new TRRServiceChannel();
+
+  LOG(("nsHttpHandler::CreateTRRServiceChannel [proxyInfo=%p]\n",
+       givenProxyInfo));
+
+  return SetupChannelInternal(httpChannel, uri, givenProxyInfo,
+                              proxyResolveFlags, proxyURI, aLoadInfo, result);
 }
 
 //-----------------------------------------------------------------------------
@@ -2137,7 +2161,7 @@ nsHttpHandler::GetMisc(nsACString& value) {
 
 NS_IMETHODIMP
 nsHttpHandler::GetAltSvcCacheKeys(nsTArray<nsCString>& value) {
-  return mConnMgr->GetAltSvcCacheKeys(value);
+  return mAltSvcCache->GetAltSvcCacheKeys(value);
 }
 
 //-----------------------------------------------------------------------------
@@ -2172,6 +2196,7 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
     // initialize connection manager
     rv = InitConnectionMgr();
     MOZ_ASSERT(NS_SUCCEEDED(rv));
+    mAltSvcCache = MakeUnique<AltSvcCache>();
   } else if (!strcmp(topic, "net:clear-active-logins")) {
     mAuthCache.ClearAll();
     mPrivateAuthCache.ClearAll();
@@ -2208,18 +2233,15 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
 #endif
   } else if (!strcmp(topic, "last-pb-context-exited")) {
     mPrivateAuthCache.ClearAll();
-    if (mConnMgr) {
-      mConnMgr->ClearAltServiceMappings();
+    if (mAltSvcCache) {
+      mAltSvcCache->ClearAltServiceMappings();
     }
   } else if (!strcmp(topic, "browser:purge-session-history")) {
     if (mConnMgr) {
-      if (gSocketTransportService) {
-        nsCOMPtr<nsIRunnable> event = NewRunnableMethod(
-            "net::nsHttpConnectionMgr::ClearConnectionHistory", mConnMgr,
-            &nsHttpConnectionMgr::ClearConnectionHistory);
-        gSocketTransportService->Dispatch(event, NS_DISPATCH_NORMAL);
+      Unused << mConnMgr->ClearConnectionHistory();
+      if (mAltSvcCache) {
+        mAltSvcCache->ClearAltServiceMappings();
       }
-      mConnMgr->ClearAltServiceMappings();
     }
   } else if (!strcmp(topic, NS_NETWORK_LINK_TOPIC)) {
     nsAutoCString converted = NS_ConvertUTF16toUTF8(data);
@@ -2423,13 +2445,13 @@ nsresult nsHttpHandler::SpeculativeConnectInternal(
   nsAutoCString username;
   aURI->GetUsername(username);
 
-  // TODO For now pass EmptyCString() for topWindowOrigin for all speculative
+  // TODO For now pass ""_ns for topWindowOrigin for all speculative
   // connection attempts, but ideally we should pass the accurate top window
   // origin here.  This would require updating the nsISpeculativeConnect API
   // and all of its consumers.
-  RefPtr<nsHttpConnectionInfo> ci = new nsHttpConnectionInfo(
-      host, port, EmptyCString(), username, EmptyCString(), nullptr,
-      originAttributes, aURI->SchemeIs("https"));
+  RefPtr<nsHttpConnectionInfo> ci =
+      new nsHttpConnectionInfo(host, port, ""_ns, username, ""_ns, nullptr,
+                               originAttributes, aURI->SchemeIs("https"));
   ci->SetAnonymous(anonymous);
 
   return SpeculativeConnect(ci, aCallbacks);
@@ -2521,8 +2543,9 @@ nsHttpsHandler::AllowPort(int32_t aPort, const char* aScheme, bool* _retval) {
   return NS_OK;
 }
 
-nsresult nsHttpHandler::EnsureHSTSDataReadyNative(
-    already_AddRefed<mozilla::net::HSTSDataCallbackWrapper> aCallback) {
+NS_IMETHODIMP
+nsHttpHandler::EnsureHSTSDataReadyNative(
+    RefPtr<mozilla::net::HSTSDataCallbackWrapper> aCallback) {
   MOZ_ASSERT(NS_IsMainThread());
 
   nsCOMPtr<nsIURI> uri;
@@ -2532,15 +2555,14 @@ nsresult nsHttpHandler::EnsureHSTSDataReadyNative(
   bool shouldUpgrade = false;
   bool willCallback = false;
   OriginAttributes originAttributes;
-  RefPtr<HSTSDataCallbackWrapper> callback = aCallback;
-  auto func = [callback](bool aResult, nsresult aStatus) {
+  auto func = [callback(aCallback)](bool aResult, nsresult aStatus) {
     callback->DoCallback(aResult);
   };
   rv = NS_ShouldSecureUpgrade(uri, nullptr, nullptr, false, false,
                               originAttributes, shouldUpgrade, std::move(func),
                               willCallback);
   if (NS_FAILED(rv) || !willCallback) {
-    callback->DoCallback(false);
+    aCallback->DoCallback(false);
     return rv;
   }
 
@@ -2586,7 +2608,7 @@ nsHttpHandler::EnsureHSTSDataReady(JSContext* aCx, Promise** aPromise) {
   RefPtr<HSTSDataCallbackWrapper> wrapper =
       new HSTSDataCallbackWrapper(std::move(callback));
   promise.forget(aPromise);
-  return EnsureHSTSDataReadyNative(wrapper.forget());
+  return EnsureHSTSDataReadyNative(wrapper);
 }
 
 void nsHttpHandler::ShutdownConnectionManager() {
@@ -2602,7 +2624,6 @@ void nsHttpHandler::ShutdownConnectionManager() {
 }
 
 nsresult nsHttpHandler::NewChannelId(uint64_t& channelId) {
-  MOZ_ASSERT(NS_IsMainThread());
   channelId =
       ((static_cast<uint64_t>(mProcessId) << 32) & 0xFFFFFFFF00000000LL) |
       mNextChannelId++;
@@ -2651,5 +2672,73 @@ bool nsHttpHandler::IsSpdyBlacklisted(const nsHttpConnectionInfo* ci) {
   return mBlacklistedSpdyOrigins.Contains(ci->GetOrigin());
 }
 
-}  // namespace net
-}  // namespace mozilla
+nsresult nsHttpHandler::InitiateTransaction(HttpTransactionShell* aTrans,
+                                            int32_t aPriority) {
+  return mConnMgr->AddTransaction(aTrans, aPriority);
+}
+nsresult nsHttpHandler::InitiateTransactionWithStickyConn(
+    HttpTransactionShell* aTrans, int32_t aPriority,
+    HttpTransactionShell* aTransWithStickyConn) {
+  return mConnMgr->AddTransactionWithStickyConn(aTrans, aPriority,
+                                                aTransWithStickyConn);
+}
+
+nsresult nsHttpHandler::RescheduleTransaction(HttpTransactionShell* trans,
+                                              int32_t priority) {
+  return mConnMgr->RescheduleTransaction(trans, priority);
+}
+
+void nsHttpHandler::UpdateClassOfServiceOnTransaction(
+    HttpTransactionShell* trans, uint32_t classOfService) {
+  mConnMgr->UpdateClassOfServiceOnTransaction(trans, classOfService);
+}
+
+nsresult nsHttpHandler::CancelTransaction(HttpTransactionShell* trans,
+                                          nsresult reason) {
+  return mConnMgr->CancelTransaction(trans, reason);
+}
+
+void nsHttpHandler::AddHttpChannel(uint64_t aId, nsISupports* aChannel) {
+  MOZ_ASSERT(XRE_IsParentProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsWeakPtr channel(do_GetWeakReference(aChannel));
+  mIDToHttpChannelMap.InsertOrUpdate(aId, std::move(channel));
+}
+
+void nsHttpHandler::RemoveHttpChannel(uint64_t aId) {
+  MOZ_ASSERT(XRE_IsParentProcess());
+  if (!NS_IsMainThread()) {
+    nsCOMPtr<nsIRunnable> idleRunnable(NewCancelableRunnableMethod<uint64_t>(
+        "nsHttpHandler::RemoveHttpChannel", this,
+        &nsHttpHandler::RemoveHttpChannel, aId));
+
+    NS_DispatchToMainThreadQueue(do_AddRef(idleRunnable),
+                                 EventQueuePriority::Idle);
+    return;
+  }
+
+  auto entry = mIDToHttpChannelMap.Lookup(aId);
+  if (entry) {
+    entry.Remove();
+  }
+}
+
+nsWeakPtr nsHttpHandler::GetWeakHttpChannel(uint64_t aId) {
+  MOZ_ASSERT(XRE_IsParentProcess());
+  MOZ_ASSERT(NS_IsMainThread());
+
+  return mIDToHttpChannelMap.Get(aId);
+}
+
+nsresult nsHttpHandler::CompleteUpgrade(
+    HttpTransactionShell* aTrans, nsIHttpUpgradeListener* aUpgradeListener) {
+  return mConnMgr->CompleteUpgrade(aTrans, aUpgradeListener);
+}
+
+nsresult nsHttpHandler::DoShiftReloadConnectionCleanup(
+    nsHttpConnectionInfo* aCi) {
+  return mConnMgr->DoShiftReloadConnectionCleanup(aCi);
+}
+
+}  // namespace mozilla::net

@@ -7,6 +7,7 @@
 #include "ClassifierDummyChannel.h"
 #include "mozilla/AntiTrackingCommon.h"
 #include "mozilla/BasePrincipal.h"
+#include "mozilla/ContentBlockingAllowList.h"
 #include "mozilla/net/HttpBaseChannel.h"
 #include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "mozilla/StaticPrefs_network.h"
@@ -413,10 +414,9 @@ void UrlClassifierCommon::AnnotateChannel(nsIChannel* aChannel,
                                isThirdPartyWithTopLevelWinURI);
 
   // We consider valid tracking flags (based on the current strict vs basic list
-  // prefs) and cryptomining (which is not considered as tracking).
+  // prefs).
   bool validClassificationFlags =
-      IsTrackingClassificationFlag(aClassificationFlags) ||
-      IsCryptominingClassificationFlag(aClassificationFlags);
+      IsTrackingClassificationFlag(aClassificationFlags);
 
   if (validClassificationFlags &&
       (isThirdPartyWithTopLevelWinURI || IsAllowListed(aChannel))) {
@@ -463,11 +463,11 @@ bool UrlClassifierCommon::IsAllowListed(nsIChannel* aChannel) {
     nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
     RefPtr<BasePrincipal> bp = BasePrincipal::CreateCodebasePrincipal(
         uri, loadInfo->GetOriginAttributes());
-    cbAllowListPrincipal = bp.forget();
+    cbAllowListPrincipal = std::move(bp);
   }
 
   bool isAllowListed = false;
-  rv = AntiTrackingCommon::IsOnContentBlockingAllowList(
+  rv = ContentBlockingAllowList::Check(
       cbAllowListPrincipal, NS_UsePrivateBrowsing(aChannel), isAllowListed);
   if (NS_FAILED(rv)) {  // normal for some loads, no need to print a warning
     return false;
@@ -502,22 +502,6 @@ bool UrlClassifierCommon::IsTrackingClassificationFlag(uint32_t aFlag) {
   return (
       aFlag &
       nsIClassifiedChannel::ClassificationFlags::CLASSIFIED_ANY_BASIC_TRACKING);
-}
-
-// static
-bool UrlClassifierCommon::IsCryptominingClassificationFlag(uint32_t aFlag) {
-  if (aFlag &
-      nsIClassifiedChannel::ClassificationFlags::CLASSIFIED_CRYPTOMINING) {
-    return true;
-  }
-
-  if (StaticPrefs::privacy_annotate_channels_strict_list_enabled() &&
-      (aFlag & nsIClassifiedChannel::ClassificationFlags::
-                   CLASSIFIED_CRYPTOMINING_CONTENT)) {
-    return true;
-  }
-
-  return false;
 }
 
 void UrlClassifierCommon::TablesToString(const nsTArray<nsCString>& aList,

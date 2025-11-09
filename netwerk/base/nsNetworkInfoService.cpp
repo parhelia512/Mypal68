@@ -17,8 +17,7 @@
 #  error "Unsupported platform for nsNetworkInfoService!  Check moz.build"
 #endif
 
-namespace mozilla {
-namespace net {
+namespace mozilla::net {
 
 NS_IMPL_ISUPPORTS(nsNetworkInfoService, nsINetworkInfoService)
 
@@ -94,5 +93,4 @@ nsresult nsNetworkInfoService::GetHostname(nsIGetHostnameListener* aListener) {
   return NS_OK;
 }
 
-}  // namespace net
-}  // namespace mozilla
+}  // namespace mozilla::net

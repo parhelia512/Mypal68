@@ -454,7 +454,7 @@ void OpenWhenReady(
 
   Unused << aPromise->ThenWithCycleCollectedArgs(
       [channel, aCallback](
-          JSContext* aCx, JS::HandleValue aValue,
+          JSContext* aCx, JS::HandleValue aValue, ErrorResult& aRv,
           nsIStreamListener* aListener) -> already_AddRefed<Promise> {
         nsresult rv = aCallback(aListener, channel);
         if (NS_FAILED(rv)) {
@@ -770,9 +770,9 @@ Result<nsCOMPtr<nsIInputStream>, nsresult> ExtensionProtocolHandler::NewStream(
   }
 
   nsCOMPtr<nsIInputStream> inputStream;
-  MOZ_TRY(NS_NewLocalFileInputStream(getter_AddRefs(inputStream), requestedFile,
-                                     PR_RDONLY, -1,
-                                     nsIFileInputStream::DEFER_OPEN));
+  MOZ_TRY_VAR(inputStream,
+              NS_NewLocalFileInputStream(requestedFile, PR_RDONLY, -1,
+                                         nsIFileInputStream::DEFER_OPEN));
 
   return inputStream;
 }

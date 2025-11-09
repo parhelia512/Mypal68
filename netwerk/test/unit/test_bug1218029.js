@@ -67,13 +67,13 @@ function execute_test(test) {
 
   let channel = {
     contentLength: -1,
-    QueryInterface: ChromeUtils.generateQI([Ci.nsIChannel]),
+    QueryInterface: ChromeUtils.generateQI(["nsIChannel"]),
   };
 
   let chunkIndex = 0;
 
   let observer = {
-    onStreamComplete: function(loader, context, status, length, data) {
+    onStreamComplete(loader, context, status, length, data) {
       equal(chunkIndex, test.dataChunks.length - 1);
       var expectedChunk = test.dataChunks[chunkIndex];
       equal(length, expectedChunk.length);
@@ -81,7 +81,7 @@ function execute_test(test) {
 
       equal(status, test.status);
     },
-    onIncrementalData: function(loader, context, length, data, consumed) {
+    onIncrementalData(loader, context, length, data, consumed) {
       ok(chunkIndex < test.dataChunks.length - 1);
       var expectedChunk = test.dataChunks[chunkIndex];
       equal(length, expectedChunk.length);
@@ -91,7 +91,7 @@ function execute_test(test) {
       chunkIndex++;
     },
     QueryInterface: ChromeUtils.generateQI([
-      Ci.nsIIncrementalStreamLoaderObserver,
+      "nsIIncrementalStreamLoaderObserver",
     ]),
   };
 

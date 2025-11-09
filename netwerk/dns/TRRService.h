@@ -10,8 +10,10 @@
 #include "nsHostResolver.h"
 #include "nsIObserver.h"
 #include "nsWeakReference.h"
+#include "nsTHashSet.h"
 
 class nsIPrefBranch;
+class nsINetworkLinkService;
 
 namespace mozilla {
 namespace net {
@@ -46,8 +48,8 @@ class TRRService : public nsIObserver,
                               bool pb,
                               const nsACString& aOriginSuffix) override;
   LookupStatus CompleteLookupByType(nsHostRecord*, nsresult,
-                                    const nsTArray<nsCString>*, uint32_t,
-                                    bool pb) override;
+                                    mozilla::net::TypeRecordResultType&,
+                                    uint32_t, bool pb) override;
   void TRRBlacklist(const nsACString& host, const nsACString& originSuffix,
                     bool privateBrowsing, bool aParentsToo);
   bool IsTRRBlacklisted(const nsACString& aHost,
@@ -58,6 +60,10 @@ class TRRService : public nsIObserver,
   bool MaybeBootstrap(const nsACString& possible, nsACString& result);
   enum TrrOkay { OKAY_NORMAL = 0, OKAY_TIMEOUT = 1, OKAY_BAD = 2 };
   void TRRIsOkay(enum TrrOkay aReason);
+
+  nsresult DispatchTRRRequest(TRR* aTrrRequest);
+  already_AddRefed<nsIThread> TRRThread();
+  bool IsOnTRRThread();
 
  private:
   virtual ~TRRService();
@@ -70,6 +76,11 @@ class TRRService : public nsIObserver,
                            const nsACString& aOriginSuffix,
                            bool aPrivateBrowsing);
   bool IsExcludedFromTRR_unlocked(const nsACString& aHost);
+
+  void CheckVPNStatus(nsINetworkLinkService* aLinkService);
+
+  nsresult DispatchTRRRequestInternal(TRR* aTrrRequest, bool aWithLock);
+  already_AddRefed<nsIThread> TRRThread_locked();
 
   bool mInitialized;
   Atomic<uint32_t, Relaxed> mMode;
@@ -96,6 +107,7 @@ class TRRService : public nsIObserver,
   Atomic<bool, Relaxed> mDisableECS;  // disable EDNS Client Subnet in requests
   Atomic<uint32_t, Relaxed>
       mDisableAfterFails;  // this many fails in a row means failed TRR service
+  Atomic<bool, Relaxed> mVPNDetected;
 
   // TRR Blacklist storage
   // mTRRBLStorage is only modified on the main thread, but we query whether it
@@ -105,7 +117,7 @@ class TRRService : public nsIObserver,
   Atomic<bool, Relaxed> mClearTRRBLStorage;
 
   // A set of domains that we should not use TRR for.
-  nsTHashtable<nsCStringHashKey> mExcludedDomains;
+  nsTHashSet<nsCString> mExcludedDomains;
 
   enum ConfirmationState {
     CONFIRM_INIT = 0,

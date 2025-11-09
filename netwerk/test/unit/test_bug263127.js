@@ -4,15 +4,9 @@ var server;
 const BUGID = "263127";
 
 var listener = {
-  QueryInterface: function(iid) {
-    if (!iid.equals(nsIDownloadObserver) && !iid.equals(nsISupports)) {
-      throw Cr.NS_ERROR_NO_INTERFACE;
-    }
+  QueryInterface: ChromeUtils.generateQI(["nsIDownloadObserver"]),
 
-    return this;
-  },
-
-  onDownloadComplete: function(downloader, request, ctxt, status, file) {
+  onDownloadComplete(downloader, request, status, file) {
     do_test_pending();
     server.stop(do_test_finished);
 
@@ -42,9 +36,7 @@ function run_test() {
     uri: "http://localhost:" + server.identity.primaryPort + "/",
     loadUsingSystemPrincipal: true,
   });
-  var targetFile = Cc["@mozilla.org/file/directory_service;1"]
-    .getService(Ci.nsIProperties)
-    .get("TmpD", Ci.nsIFile);
+  var targetFile = Services.dirsvc.get("TmpD", Ci.nsIFile);
   targetFile.append("bug" + BUGID + ".test");
   if (targetFile.exists()) {
     targetFile.remove(false);

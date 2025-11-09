@@ -11,7 +11,7 @@ function WellKnownOpportunisticUtils() {
 }
 
 WellKnownOpportunisticUtils.prototype = {
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIWellKnownOpportunisticUtils]),
+  QueryInterface: ChromeUtils.generateQI(["nsIWellKnownOpportunisticUtils"]),
 
   verify(aJSON, aOrigin) {
     try {

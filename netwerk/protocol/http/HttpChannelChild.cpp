@@ -60,10 +60,6 @@
 #include "nsApplicationCache.h"
 #include "ClassifierDummyChannel.h"
 
-#ifdef MOZ_TASK_TRACER
-#  include "GeckoTaskTracer.h"
-#endif
-
 #ifdef MOZ_GECKO_PROFILER
 #  include "ProfilerMarkerPayload.h"
 #endif
@@ -82,7 +78,7 @@ NS_IMPL_ISUPPORTS(InterceptStreamListener, nsIStreamListener,
 NS_IMETHODIMP
 InterceptStreamListener::OnStartRequest(nsIRequest* aRequest) {
   if (mOwner) {
-    mOwner->DoOnStartRequest(mOwner, nullptr);
+    mOwner->DoOnStartRequest(mOwner);
   }
   return NS_OK;
 }
@@ -129,7 +125,7 @@ InterceptStreamListener::OnDataAvailable(nsIRequest* aRequest,
     OnProgress(mOwner, progress, mOwner->mSynthesizedStreamLength);
   }
 
-  mOwner->DoOnDataAvailable(mOwner, nullptr, aInputStream, aOffset, aCount);
+  mOwner->DoOnDataAvailable(mOwner, aInputStream, aOffset, aCount);
   return NS_OK;
 }
 
@@ -138,7 +134,7 @@ InterceptStreamListener::OnStopRequest(nsIRequest* aRequest,
                                        nsresult aStatusCode) {
   if (mOwner) {
     mOwner->DoPreOnStopRequest(aStatusCode);
-    mOwner->DoOnStopRequest(mOwner, aStatusCode, mContext);
+    mOwner->DoOnStopRequest(mOwner, aStatusCode);
   }
   Cleanup();
   return NS_OK;
@@ -414,16 +410,6 @@ void HttpChannelChild::OnBackgroundChildDestroyed(
   }
 }
 
-mozilla::ipc::IPCResult HttpChannelChild::RecvAssociateApplicationCache(
-    const nsCString& aGroupID, const nsCString& aClientID) {
-  LOG(("HttpChannelChild::RecvAssociateApplicationCache [this=%p]\n", this));
-  mEventQ->RunOrEnqueue(new NeckoTargetChannelFunctionEvent(
-      this, [self = UnsafePtr<HttpChannelChild>(this), aGroupID, aClientID]() {
-        self->AssociateApplicationCache(aGroupID, aClientID);
-      }));
-  return IPC_OK();
-}
-
 void HttpChannelChild::AssociateApplicationCache(const nsCString& aGroupID,
                                                  const nsCString& aClientID) {
   LOG(("HttpChannelChild::AssociateApplicationCache [this=%p]\n", this));
@@ -570,7 +556,23 @@ void HttpChannelChild::OnStartRequest(
 
   mAllRedirectsSameOrigin = aArgs.allRedirectsSameOrigin();
 
-  DoOnStartRequest(this, nullptr);
+  if (!aArgs.appCacheGroupId().IsEmpty() &&
+      !aArgs.appCacheClientId().IsEmpty()) {
+    AssociateApplicationCache(aArgs.appCacheGroupId(),
+                              aArgs.appCacheClientId());
+  }
+
+  if (aArgs.overrideReferrerInfo()) {
+    // The arguments passed to SetReferrerInfoInternal here should mirror the
+    // arguments passed in
+    // nsHttpChannel::ReEvaluateReferrerAfterTrackingStatusIsKnown(), except for
+    // aRespectBeforeConnect which we pass false here since we're intentionally
+    // overriding the referrer after BeginConnect().
+    Unused << SetReferrerInfoInternal(aArgs.overrideReferrerInfo(), false, true,
+                                      false);
+  }
+
+  DoOnStartRequest(this);
 }
 
 class SyntheticDiversionListener final : public nsIStreamListener {
@@ -624,8 +626,7 @@ class SyntheticDiversionListener final : public nsIStreamListener {
 
 NS_IMPL_ISUPPORTS(SyntheticDiversionListener, nsIStreamListener);
 
-void HttpChannelChild::DoOnStartRequest(nsIRequest* aRequest,
-                                        nsISupports* aContext) {
+void HttpChannelChild::DoOnStartRequest(nsIRequest* aRequest) {
   nsresult rv;
 
   LOG(("HttpChannelChild::DoOnStartRequest [this=%p]\n", this));
@@ -801,7 +802,7 @@ void HttpChannelChild::OnTransportAndData(const nsresult& aChannelStatus,
     return;
   }
 
-  DoOnDataAvailable(this, nullptr, stringStream, aOffset, aCount);
+  DoOnDataAvailable(this, stringStream, aOffset, aCount);
   stringStream->Close();
 
   if (NeedToReportBytesRead()) {
@@ -893,7 +894,6 @@ void HttpChannelChild::DoOnProgress(nsIRequest* aRequest, int64_t progress,
 }
 
 void HttpChannelChild::DoOnDataAvailable(nsIRequest* aRequest,
-                                         nsISupports* aContext,
                                          nsIInputStream* aStream,
                                          uint64_t aOffset, uint32_t aCount) {
   AUTO_PROFILER_LABEL("HttpChannelChild::DoOnDataAvailable", NETWORK);
@@ -1016,7 +1016,7 @@ void HttpChannelChild::OnStopRequest(
     // so make sure this goes out of scope before then.
     AutoEventEnqueuer ensureSerialDispatch(mEventQ);
 
-    DoOnStopRequest(this, aChannelStatus, nullptr);
+    DoOnStopRequest(this, aChannelStatus);
     // DoOnStopRequest() calls ReleaseListeners()
   }
 
@@ -1077,8 +1077,7 @@ void HttpChannelChild::DoPreOnStopRequest(nsresult aStatus) {
 }
 
 void HttpChannelChild::DoOnStopRequest(nsIRequest* aRequest,
-                                       nsresult aChannelStatus,
-                                       nsISupports* aContext) {
+                                       nsresult aChannelStatus) {
   AUTO_PROFILER_LABEL("HttpChannelChild::DoOnStopRequest", NETWORK);
   LOG(("HttpChannelChild::DoOnStopRequest [this=%p]\n", this));
   MOZ_ASSERT(NS_IsMainThread());
@@ -2402,16 +2401,6 @@ nsresult HttpChannelChild::AsyncOpenInternal(nsIStreamListener* aListener) {
     mAsyncOpenTime = TimeStamp::Now();
   }
 
-#ifdef MOZ_TASK_TRACER
-  if (tasktracer::IsStartLogging()) {
-    nsCOMPtr<nsIURI> uri;
-    GetURI(getter_AddRefs(uri));
-    nsAutoCString urispec;
-    uri->GetSpec(urispec);
-    tasktracer::AddLabel("HttpChannelChild::AsyncOpen %s", urispec.get());
-  }
-#endif
-
   // Port checked in parent, but duplicate here so we can return with error
   // immediately
   rv = NS_CheckPortSafety(mURI);
@@ -3149,19 +3138,6 @@ mozilla::ipc::IPCResult HttpChannelChild::RecvAltDataCacheInputStreamAvailable(
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult
-HttpChannelChild::RecvOverrideReferrerInfoDuringBeginConnect(
-    nsIReferrerInfo* aReferrerInfo) {
-  // The arguments passed to SetReferrerInfoInternal here should mirror the
-  // arguments passed in
-  // nsHttpChannel::ReEvaluateReferrerAfterTrackingStatusIsKnown(), except for
-  // aRespectBeforeConnect which we pass false here since we're intentionally
-  // overriding the referrer after BeginConnect().
-  Unused << SetReferrerInfoInternal(aReferrerInfo, false, true, false);
-
-  return IPC_OK();
-}
-
 //-----------------------------------------------------------------------------
 // HttpChannelChild::nsIResumableChannel
 //-----------------------------------------------------------------------------
@@ -3242,6 +3218,11 @@ HttpChannelChild::ClearClassFlags(uint32_t inFlags) {
 
 NS_IMETHODIMP
 HttpChannelChild::GetProxyInfo(nsIProxyInfo** aProxyInfo) { DROP_DEAD(); }
+
+NS_IMETHODIMP HttpChannelChild::GetHttpProxyConnectResponseCode(
+    int32_t* aResponseCode) {
+  DROP_DEAD();
+}
 
 //-----------------------------------------------------------------------------
 // HttpChannelChild::nsIApplicationCacheContainer

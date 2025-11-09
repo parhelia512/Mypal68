@@ -42,7 +42,6 @@ namespace mozilla {
 namespace net {
 
 class nsChannelClassifier;
-class Http2PushedStream;
 
 using DNSPromise = MozPromise<nsCOMPtr<nsIDNSRecord>, nsresult, false>;
 
@@ -142,8 +141,10 @@ class nsHttpChannel final : public HttpBaseChannel,
       uint32_t aProxyResolveFlags, nsIURI* aProxyURI, uint64_t aChannelId,
       ExtContentPolicyType aContentPolicyType) override;
 
-  [[nodiscard]] nsresult OnPush(const nsACString& uri,
-                                Http2PushedStreamWrapper* pushedStream);
+  [[nodiscard]] nsresult OnPush(uint32_t aPushedStreamId,
+                                const nsACString& aUrl,
+                                const nsACString& aRequestString,
+                                HttpTransactionShell* aTransaction);
 
   static bool IsRedirectStatus(uint32_t status);
   static bool WillRedirect(const nsHttpResponseHead& response);
@@ -446,20 +447,20 @@ class nsHttpChannel final : public HttpBaseChannel,
   MOZ_MUST_USE nsresult OnDoneReadingPartialCacheEntry(bool* streamDone);
 
   MOZ_MUST_USE nsresult
-  DoAuthRetry(nsHttpTransaction* aTransWithStickyConn,
+  DoAuthRetry(HttpTransactionShell* aTransWithStickyConn,
               const std::function<nsresult(nsHttpChannel*, nsresult)>&
                   aContinueOnStopRequestFunc);
   MOZ_MUST_USE nsresult
-  ContinueDoAuthRetry(nsHttpTransaction* aTransWithStickyConn,
+  ContinueDoAuthRetry(HttpTransactionShell* aTransWithStickyConn,
                       const std::function<nsresult(nsHttpChannel*, nsresult)>&
                           aContinueOnStopRequestFunc);
   MOZ_MUST_USE nsresult
-  DoConnect(nsHttpTransaction* aTransWithStickyConn = nullptr);
+  DoConnect(HttpTransactionShell* aTransWithStickyConn = nullptr);
   MOZ_MUST_USE nsresult
-  DoConnectActual(nsHttpTransaction* aTransWithStickyConn);
+  DoConnectActual(HttpTransactionShell* aTransWithStickyConn);
   MOZ_MUST_USE nsresult ContinueOnStopRequestAfterAuthRetry(
       nsresult aStatus, bool aAuthRetry, bool aIsFromNet, bool aContentComplete,
-      nsHttpTransaction* aTransWithStickyConn);
+      HttpTransactionShell* aTransWithStickyConn);
   MOZ_MUST_USE nsresult ContinueOnStopRequest(nsresult status, bool aIsFromNet,
                                               bool aContentComplete);
 
@@ -539,11 +540,10 @@ class nsHttpChannel final : public HttpBaseChannel,
                                              bool startBuffering,
                                              bool checkingAppCacheEntry);
 
-  void SetPushedStream(Http2PushedStreamWrapper* stream);
+  void SetPushedStreamTransactionAndId(
+      HttpTransactionShell* aTransWithPushedStream, uint32_t aPushedStreamId);
 
   void MaybeWarnAboutAppCache();
-
-  void SetLoadGroupUserAgentOverride();
 
   void SetOriginHeader();
   void SetDoNotTrack();
@@ -604,8 +604,8 @@ class nsHttpChannel final : public HttpBaseChannel,
  private:
   nsCOMPtr<nsICancelable> mProxyRequest;
 
-  RefPtr<nsInputStreamPump> mTransactionPump;
-  RefPtr<nsHttpTransaction> mTransaction;
+  nsCOMPtr<nsIRequest> mTransactionPump;
+  RefPtr<HttpTransactionShell> mTransaction;
 
   uint64_t mLogicalOffset;
 
@@ -741,7 +741,9 @@ class nsHttpChannel final : public HttpBaseChannel,
   // Needed for accurate DNS timing
   RefPtr<nsDNSPrefetch> mDNSPrefetch;
 
-  RefPtr<Http2PushedStreamWrapper> mPushedStream;
+  uint32_t mPushedStreamId;
+  RefPtr<HttpTransactionShell> mTransWithPushedStream;
+
   // True if the channel's principal was found on a phishing, malware, or
   // tracking (if tracking protection is enabled) blocklist
   bool mLocalBlocklist;
@@ -834,6 +836,10 @@ class nsHttpChannel final : public HttpBaseChannel,
   // When we hit DoConnect before the resolution is done, Then() will be set
   // here to resume DoConnect.
   RefPtr<DNSPromise> mDNSBlockingThenable;
+
+  // We update the value of mProxyConnectResponseCode when OnStartRequest is
+  // called and reset the value when we switch to another failover proxy.
+  int32_t mProxyConnectResponseCode;
 
  protected:
   virtual void DoNotifyListenerCleanup() override;

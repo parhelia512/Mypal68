@@ -78,6 +78,11 @@ nsFtpChannel::GetProxyInfo(nsIProxyInfo** aProxyInfo) {
   return NS_OK;
 }
 
+NS_IMETHODIMP nsFtpChannel::GetHttpProxyConnectResponseCode(
+    int32_t* aResponseCode) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 //-----------------------------------------------------------------------------
 
 nsresult nsFtpChannel::OpenContentStream(bool async, nsIInputStream** result,

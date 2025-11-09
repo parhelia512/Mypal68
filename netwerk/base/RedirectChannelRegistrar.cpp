@@ -42,7 +42,7 @@ RedirectChannelRegistrar::RegisterChannel(nsIChannel* channel,
                                           uint32_t* _retval) {
   MutexAutoLock lock(mLock);
 
-  mRealChannels.Put(mId, channel);
+  mRealChannels.InsertOrUpdate(mId, channel);
   *_retval = mId;
 
   ++mId;
@@ -70,7 +70,7 @@ RedirectChannelRegistrar::LinkChannels(uint32_t id, nsIParentChannel* channel,
 
   if (!mRealChannels.Get(id, _retval)) return NS_ERROR_NOT_AVAILABLE;
 
-  mParentChannels.Put(id, channel);
+  mParentChannels.InsertOrUpdate(id, channel);
   return NS_OK;
 }
 

@@ -14,8 +14,8 @@
 #include "mozilla/WeakPtr.h"
 #include "nsAHttpConnection.h"
 #include "nsCOMArray.h"
-#include "nsClassHashtable.h"
-#include "nsDataHashtable.h"
+#include "nsRefPtrHashtable.h"
+#include "nsTHashMap.h"
 #include "nsDeque.h"
 #include "nsHashKeys.h"
 #include "nsHttpRequestHead.h"
@@ -359,7 +359,7 @@ class Http2Session final : public ASpdySession,
   // These are temporary state variables to hold the argument to
   // Read/WriteSegments so it can be accessed by On(read/write)segment
   // further up the stack.
-  nsAHttpSegmentReader* mSegmentReader;
+  RefPtr<nsAHttpSegmentReader> mSegmentReader;
   nsAHttpSegmentWriter* mSegmentWriter;
 
   uint32_t mSendingChunkSize; /* the transmission chunk size */
@@ -374,17 +374,14 @@ class Http2Session final : public ASpdySession,
   // There are also several lists of streams: ready to write, queued due to
   // max parallelism, streams that need to force a read for push, and the full
   // set of pushed streams.
-  // The objects are not ref counted - they get destroyed
-  // by the nsClassHashtable implementation when they are removed from
-  // the transaction hash.
-  nsDataHashtable<nsUint32HashKey, Http2Stream*> mStreamIDHash;
-  nsClassHashtable<nsPtrHashKey<nsAHttpTransaction>, Http2Stream>
+  nsTHashMap<nsUint32HashKey, Http2Stream*> mStreamIDHash;
+  nsRefPtrHashtable<nsPtrHashKey<nsAHttpTransaction>, Http2Stream>
       mStreamTransactionHash;
 
-  nsDeque mReadyForWrite;
-  nsDeque mQueuedStreams;
-  nsDeque mPushesReadyForRead;
-  nsDeque mSlowConsumersReadyForRead;
+  nsDeque<Http2Stream> mReadyForWrite;
+  nsDeque<Http2Stream> mQueuedStreams;
+  nsDeque<Http2Stream> mPushesReadyForRead;
+  nsDeque<Http2Stream> mSlowConsumersReadyForRead;
   nsTArray<Http2PushedStream*> mPushedStreams;
 
   // Compression contexts for header transport.
@@ -524,7 +521,7 @@ class Http2Session final : public ASpdySession,
   bool mPreviousUsed;                     // true when backup is used
 
   // used as a temporary buffer while enumerating the stream hash during GoAway
-  nsDeque mGoAwayStreamsToRestart;
+  nsDeque<Http2Stream> mGoAwayStreamsToRestart;
 
   // Each session gets a unique serial number because the push cache is
   // correlated by the load group and the serial number can be used as part of
@@ -550,9 +547,9 @@ class Http2Session final : public ASpdySession,
   bool RealJoinConnection(const nsACString& hostname, int32_t port, bool jk);
   bool TestOriginFrame(const nsACString& name, int32_t port);
   bool mOriginFrameActivated;
-  nsDataHashtable<nsCStringHashKey, bool> mOriginFrame;
+  nsTHashMap<nsCStringHashKey, bool> mOriginFrame;
 
-  nsDataHashtable<nsCStringHashKey, bool> mJoinConnectionCache;
+  nsTHashMap<nsCStringHashKey, bool> mJoinConnectionCache;
 
   uint64_t mCurrentForegroundTabOuterContentWindowId;
 
@@ -591,7 +588,8 @@ class Http2Session final : public ASpdySession,
   void RegisterTunnel(Http2Stream*);
   void UnRegisterTunnel(Http2Stream*);
   uint32_t FindTunnelCount(nsHttpConnectionInfo*);
-  nsDataHashtable<nsCStringHashKey, uint32_t> mTunnelHash;
+  uint32_t FindTunnelCount(nsCString const&);
+  nsTHashMap<nsCStringHashKey, uint32_t> mTunnelHash;
   uint32_t mTrrStreams;
 
   // websockets

@@ -26,6 +26,11 @@
 #include "nsSocketTransportService2.h"
 #include "mozilla/Mutex.h"
 
+#if defined(FUZZING)
+#  include "FuzzySecurityInfo.h"
+#  include "mozilla/StaticPrefs_fuzzing.h"
+#endif
+
 namespace mozilla {
 namespace net {
 
@@ -79,11 +84,25 @@ TLSFilterTransaction::TLSFilterTransaction(nsAHttpTransaction* aWrapped,
 
   mFD = PR_CreateIOLayerStub(sLayerIdentity, &sLayerMethods);
 
+  bool addTLSLayer = true;
+#ifdef FUZZING
+  addTLSLayer = !StaticPrefs::fuzzing_necko_enabled();
+  if (!addTLSLayer) {
+    SOCKET_LOG(("Skipping TLS layer in TLSFilterTransaction for fuzzing.\n"));
+
+    mSecInfo = static_cast<nsISupports*>(
+        static_cast<nsISSLSocketControl*>(new FuzzySecurityInfo()));
+  }
+#endif
+
   if (provider && mFD) {
     mFD->secret = reinterpret_cast<PRFilePrivate*>(this);
-    provider->AddToSocket(PR_AF_INET, aTLSHost, aTLSPort, nullptr,
-                          OriginAttributes(), 0, 0, mFD,
-                          getter_AddRefs(mSecInfo));
+
+    if (addTLSLayer) {
+      provider->AddToSocket(PR_AF_INET, aTLSHost, aTLSPort, nullptr,
+                            OriginAttributes(), 0, 0, mFD,
+                            getter_AddRefs(mSecInfo));
+    }
   }
 
   if (mTransaction) {
@@ -628,14 +647,6 @@ uint32_t TLSFilterTransaction::Caps() {
   return mTransaction->Caps();
 }
 
-void TLSFilterTransaction::SetDNSWasRefreshed() {
-  if (!mTransaction) {
-    return;
-  }
-
-  mTransaction->SetDNSWasRefreshed();
-}
-
 void TLSFilterTransaction::SetProxyConnectFailed() {
   if (!mTransaction) {
     return;
@@ -1081,7 +1092,7 @@ void SpdyConnectTransaction::ForcePlainText() {
 
 void SpdyConnectTransaction::MapStreamToHttpConnection(
     nsISocketTransport* aTransport, nsHttpConnectionInfo* aConnInfo,
-    int32_t httpResponseCode) {
+    const nsACString& aFlat407Headers, int32_t aHttpResponseCode) {
   MOZ_ASSERT(OnSocketThread());
 
   mConnInfo = aConnInfo;
@@ -1091,24 +1102,14 @@ void SpdyConnectTransaction::MapStreamToHttpConnection(
   mTunnelStreamOut = new OutputStreamShim(this, mIsWebsocket);
   mTunneledConn = new nsHttpConnection();
 
-  switch (httpResponseCode) {
-    case 404:
-      CreateShimError(NS_ERROR_UNKNOWN_HOST);
-      break;
-    case 407:
-      CreateShimError(NS_ERROR_PROXY_AUTHENTICATION_FAILED);
-      break;
-    case 429:
-      CreateShimError(NS_ERROR_TOO_MANY_REQUESTS);
-      break;
-    case 502:
-      CreateShimError(NS_ERROR_PROXY_BAD_GATEWAY);
-      break;
-    case 504:
-      CreateShimError(NS_ERROR_PROXY_GATEWAY_TIMEOUT);
-      break;
-    default:
-      break;
+  // If aHttpResponseCode is -1, it means that proxy connect is not used. We
+  // should not call HttpProxyResponseToErrorCode(), since this will create a
+  // shim error.
+  if (aHttpResponseCode > 0 && aHttpResponseCode != 200) {
+    nsresult err = HttpProxyResponseToErrorCode(aHttpResponseCode);
+    if (NS_FAILED(err)) {
+      CreateShimError(err);
+    }
   }
 
   // this new http connection has a specific hashkey (i.e. to a particular
@@ -1144,6 +1145,12 @@ void SpdyConnectTransaction::MapStreamToHttpConnection(
       gHttpHandler->ConnMgr()->MakeConnectionHandle(mTunneledConn);
   mDrivingTransaction->SetConnection(wrappedConn);
   mDrivingTransaction->MakeSticky();
+  mDrivingTransaction->OnProxyConnectComplete(aHttpResponseCode);
+
+  if (aHttpResponseCode == 407) {
+    mDrivingTransaction->SetFlat407Headers(aFlat407Headers);
+    mDrivingTransaction->SetProxyConnectFailed();
+  }
 
   if (!mIsWebsocket) {
     // jump the priority and start the dispatcher

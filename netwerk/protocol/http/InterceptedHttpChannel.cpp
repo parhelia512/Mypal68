@@ -749,7 +749,7 @@ InterceptedHttpChannel::StartSynthesizedResponse(
   // stream here so later code can be simpler.
   mBodyReader = aBody;
   if (!mBodyReader) {
-    rv = NS_NewCStringInputStream(getter_AddRefs(mBodyReader), EmptyCString());
+    rv = NS_NewCStringInputStream(getter_AddRefs(mBodyReader), ""_ns);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -903,7 +903,7 @@ InterceptedHttpChannel::SaveTimeStamps(void) {
   nsCString navigationOrSubresource =
       isNonSubresourceRequest ? "navigation"_ns : "subresource"_ns;
 
-  nsAutoCString subresourceKey(EmptyCString());
+  nsAutoCString subresourceKey(""_ns);
   GetSubresourceTimeStampKey(this, subresourceKey);
 
   return NS_OK;

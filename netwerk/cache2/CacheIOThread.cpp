@@ -20,19 +20,13 @@
 #  include <windows.h>
 #endif
 
-#ifdef MOZ_TASK_TRACER
-#  include "GeckoTaskTracer.h"
-#  include "TracedTaskCommon.h"
-#endif
-
-namespace mozilla {
-namespace net {
+namespace mozilla::net {
 
 namespace {  // anon
 
 class CacheIOTelemetry {
  public:
-  typedef CacheIOThread::EventQueue::size_type size_type;
+  using size_type = CacheIOThread::EventQueue::size_type;
   static size_type mMinLengthToReport[CacheIOThread::LAST_LEVEL];
   static void Report(uint32_t aLevel, size_type aLength);
 };
@@ -283,8 +277,9 @@ nsresult CacheIOThread::Dispatch(already_AddRefed<nsIRunnable> aRunnable,
 
   Monitor2AutoLock lock(mMonitor);
 
-  if (mShutdown && (PR_GetCurrentThread() != mThread))
+  if (mShutdown && (PR_GetCurrentThread() != mThread)) {
     return NS_ERROR_UNEXPECTED;
+  }
 
   return DispatchInternal(runnable.forget(), aLevel);
 }
@@ -295,8 +290,9 @@ nsresult CacheIOThread::DispatchAfterPendingOpens(nsIRunnable* aRunnable) {
 
   Monitor2AutoLock lock(mMonitor);
 
-  if (mShutdown && (PR_GetCurrentThread() != mThread))
+  if (mShutdown && (PR_GetCurrentThread() != mThread)) {
     return NS_ERROR_UNEXPECTED;
+  }
 
   // Move everything from later executed OPEN level to the OPEN_PRIORITY level
   // where we post the (eviction) runnable.
@@ -311,12 +307,6 @@ nsresult CacheIOThread::DispatchAfterPendingOpens(nsIRunnable* aRunnable) {
 nsresult CacheIOThread::DispatchInternal(
     already_AddRefed<nsIRunnable> aRunnable, uint32_t aLevel) {
   nsCOMPtr<nsIRunnable> runnable(aRunnable);
-#ifdef MOZ_TASK_TRACER
-  if (tasktracer::IsStartLogging()) {
-    runnable = tasktracer::CreateTracedRunnable(runnable.forget());
-    (static_cast<tasktracer::TracedRunnable*>(runnable.get()))->DispatchTask();
-  }
-#endif
 
   if (NS_WARN_IF(!runnable)) return NS_ERROR_NULL_POINTER;
 
@@ -495,7 +485,6 @@ void CacheIOThread::ThreadFunc() {
       }
 
       AUTO_PROFILER_LABEL("CacheIOThread::ThreadFunc::Wait", IDLE);
-      AUTO_PROFILER_THREAD_SLEEP;
       lock.Wait();
 
     } while (true);
@@ -643,5 +632,4 @@ CacheIOThread::Cancelable::~Cancelable() {
   }
 }
 
-}  // namespace net
-}  // namespace mozilla
+}  // namespace mozilla::net

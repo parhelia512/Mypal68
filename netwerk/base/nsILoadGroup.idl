@@ -101,10 +101,4 @@ interface nsILoadGroup : nsIRequest
      */
     [infallible]
     readonly attribute boolean isBrowsingContextDiscarded;
-
-    /**
-     * The cached user agent override created by UserAgentOverrides.jsm. Used
-     * for all sub-resource requests in the loadgroup.
-     */
-    attribute ACString userAgentOverrideCache;
 };

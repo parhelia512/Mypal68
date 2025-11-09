@@ -32,6 +32,7 @@
 #include "nsThreadUtils.h"
 #include "mozilla/Logging.h"
 
+#include "mozilla/OriginAttributes.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticPrefs_network.h"
 
@@ -119,13 +120,6 @@ NS_IMPL_ISUPPORTS(Predictor::DNSListener, nsIDNSListener);
 NS_IMETHODIMP
 Predictor::DNSListener::OnLookupComplete(nsICancelable* request,
                                          nsIDNSRecord* rec, nsresult status) {
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-Predictor::DNSListener::OnLookupByTypeComplete(nsICancelable* request,
-                                               nsIDNSByTypeRecord* res,
-                                               nsresult status) {
   return NS_OK;
 }
 
@@ -579,7 +573,7 @@ Predictor::PredictNative(nsIURI* targetURI, nsIURI* sourceURI,
   uint32_t openFlags =
       nsICacheStorage::OPEN_READONLY | nsICacheStorage::OPEN_SECRETLY |
       nsICacheStorage::OPEN_PRIORITY | nsICacheStorage::CHECK_MULTITHREADED;
-  cacheDiskStorage->AsyncOpenURI(uriKey, EmptyCString(), openFlags, uriAction);
+  cacheDiskStorage->AsyncOpenURI(uriKey, ""_ns, openFlags, uriAction);
 
   // Now we do the origin-only (and therefore predictor-only) entry
   nsCOMPtr<nsIURI> targetOrigin;
@@ -730,7 +724,7 @@ bool Predictor::PredictForPageload(nsICacheEntry* entry, nsIURI* targetURI,
     uint32_t openFlags =
         nsICacheStorage::OPEN_READONLY | nsICacheStorage::OPEN_SECRETLY |
         nsICacheStorage::OPEN_PRIORITY | nsICacheStorage::CHECK_MULTITHREADED;
-    cacheDiskStorage->AsyncOpenURI(redirectURI, EmptyCString(), openFlags,
+    cacheDiskStorage->AsyncOpenURI(redirectURI, ""_ns, openFlags,
                                    redirectAction);
     return RunPredictions(nullptr, *lci->OriginAttributesPtr(), verifier);
   }
@@ -1072,7 +1066,7 @@ nsresult Predictor::Prefetch(nsIURI* uri, nsIURI* referrer,
     return NS_ERROR_UNEXPECTED;
   }
 
-  nsCOMPtr<nsIReferrerInfo> referrerInfo = new ReferrerInfo(referrer);
+  nsCOMPtr<nsIReferrerInfo> referrerInfo = new dom::ReferrerInfo(referrer);
   rv = httpChannel->SetReferrerInfoWithoutClone(referrerInfo);
   NS_ENSURE_SUCCESS(rv, rv);
   // XXX - set a header here to indicate this is a prefetch?
@@ -1317,8 +1311,7 @@ Predictor::LearnNative(nsIURI* targetURI, nsIURI* sourceURI,
     // opened ASAP.
     uriOpenFlags |= nsICacheStorage::OPEN_PRIORITY;
   }
-  cacheDiskStorage->AsyncOpenURI(uriKey, EmptyCString(), uriOpenFlags,
-                                 uriAction);
+  cacheDiskStorage->AsyncOpenURI(uriKey, ""_ns, uriOpenFlags, uriAction);
 
   // Now we open the origin-only (and therefore predictor-only) entry
   RefPtr<Predictor::Action> originAction = new Predictor::Action(
@@ -1842,7 +1835,7 @@ Predictor::Resetter::OnCacheEntryVisitCompleted() {
     NS_ENSURE_SUCCESS(rv, rv);
 
     urisToVisit[i]->GetAsciiSpec(u);
-    cacheDiskStorage->AsyncOpenURI(urisToVisit[i], EmptyCString(),
+    cacheDiskStorage->AsyncOpenURI(urisToVisit[i], ""_ns,
                                    nsICacheStorage::OPEN_READONLY |
                                        nsICacheStorage::OPEN_SECRETLY |
                                        nsICacheStorage::CHECK_MULTITHREADED,
@@ -2022,7 +2015,7 @@ Predictor::OnPredictPrefetch(nsIURI* aURI, uint32_t httpStatus) {
 
   MOZ_DIAGNOSTIC_ASSERT(aURI, "aURI must not be null");
 
-  for (auto* cp : ContentParent::AllProcesses(ContentParent::eLive)) {
+  for (auto* cp : dom::ContentParent::AllProcesses(dom::ContentParent::eLive)) {
     PNeckoParent* neckoParent = SingleManagedOrNull(cp->ManagedPNeckoParent());
     if (!neckoParent) {
       continue;
@@ -2049,7 +2042,7 @@ Predictor::OnPredictPreconnect(nsIURI* aURI) {
 
   MOZ_DIAGNOSTIC_ASSERT(aURI, "aURI must not be null");
 
-  for (auto* cp : ContentParent::AllProcesses(ContentParent::eLive)) {
+  for (auto* cp : dom::ContentParent::AllProcesses(dom::ContentParent::eLive)) {
     PNeckoParent* neckoParent = SingleManagedOrNull(cp->ManagedPNeckoParent());
     if (!neckoParent) {
       continue;
@@ -2076,7 +2069,7 @@ Predictor::OnPredictDNS(nsIURI* aURI) {
 
   MOZ_DIAGNOSTIC_ASSERT(aURI, "aURI must not be null");
 
-  for (auto* cp : ContentParent::AllProcesses(ContentParent::eLive)) {
+  for (auto* cp : dom::ContentParent::AllProcesses(dom::ContentParent::eLive)) {
     PNeckoParent* neckoParent = SingleManagedOrNull(cp->ManagedPNeckoParent());
     if (!neckoParent) {
       continue;
@@ -2245,7 +2238,7 @@ void Predictor::UpdateCacheabilityInternal(
   nsAutoCString uri;
   targetURI->GetAsciiSpec(uri);
   PREDICTOR_LOG(("    uri=%s action=%p", uri.get(), action.get()));
-  cacheDiskStorage->AsyncOpenURI(sourceURI, EmptyCString(), openFlags, action);
+  cacheDiskStorage->AsyncOpenURI(sourceURI, ""_ns, openFlags, action);
 }
 
 NS_IMPL_ISUPPORTS(Predictor::CacheabilityAction, nsICacheEntryOpenCallback,

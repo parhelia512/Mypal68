@@ -127,9 +127,7 @@ function do_app_cache(manifestURL, pageURL) {
 
 function watch_update(update, stateChangeHandler, cacheAvailHandler) {
   let observer = {
-    QueryInterface: function QueryInterface(iftype) {
-      return this;
-    },
+    QueryInterface: ChromeUtils.generateQI([]),
 
     updateStateChanged: stateChangeHandler,
     applicationCacheAvailable: cacheAvailHandler,
@@ -204,9 +202,9 @@ function check_bug() {
 
       // Doom foo1 & foo2
       storage.asyncDoomURI(createURI(kHttpLocation + "pages/foo1"), "", {
-        onCacheEntryDoomed: function() {
+        onCacheEntryDoomed() {
           storage.asyncDoomURI(createURI(kHttpLocation + "pages/foo2"), "", {
-            onCacheEntryDoomed: function() {
+            onCacheEntryDoomed() {
               check_evict_cache(appcache);
             },
           });

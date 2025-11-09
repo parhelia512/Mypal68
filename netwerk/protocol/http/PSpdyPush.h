@@ -24,7 +24,7 @@
 #ifndef mozilla_net_SpdyPush_Public_h
 #define mozilla_net_SpdyPush_Public_h
 
-#include "nsDataHashtable.h"
+#include "nsTHashMap.h"
 #include "nsISupports.h"
 #include "nsStringFwd.h"
 
@@ -46,7 +46,7 @@ class SpdyPushCache {
                                                  const uint32_t& streamID);
 
  private:
-  nsDataHashtable<nsCStringHashKey, Http2PushedStream*> mHashHttp2;
+  nsTHashMap<nsCStringHashKey, Http2PushedStream*> mHashHttp2;
 };
 
 }  // namespace net

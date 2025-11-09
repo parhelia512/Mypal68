@@ -6,7 +6,6 @@
 #define mozilla_net_CookieSettings_h
 
 #include "nsICookieSettings.h"
-#include "nsDataHashtable.h"
 
 class nsIPermission;
 

@@ -32,27 +32,24 @@ CustomProtocolHandler.prototype = {
       Ci.nsIProtocolHandler.URI_IS_LOCAL_RESOURCE
     );
   },
-  newChannel: function(aURI, aLoadInfo) {
+  newChannel(aURI, aLoadInfo) {
     return new CustomChannel(aURI, aLoadInfo);
   },
-  allowPort: function(port, scheme) {
+  allowPort(port, scheme) {
     return port != -1;
   },
 
   /** nsIFactory */
-  createInstance: function(aOuter, aIID) {
+  createInstance(aOuter, aIID) {
     if (aOuter) {
-      throw Cr.NS_ERROR_NO_AGGREGATION;
+      throw Components.Exception("", Cr.NS_ERROR_NO_AGGREGATION);
     }
     return this.QueryInterface(aIID);
   },
-  lockFactory: function() {},
+  lockFactory() {},
 
   /** nsISupports */
-  QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIProtocolHandler,
-    Ci.nsIFactory,
-  ]),
+  QueryInterface: ChromeUtils.generateQI(["nsIProtocolHandler", "nsIFactory"]),
   classID: Components.ID("{16d594bc-d9d8-47ae-a139-ea714dc0c35c}"),
 };
 
@@ -78,7 +75,7 @@ CustomChannel.prototype = {
   set uploadStream(val) {
     throw Cr.NS_ERROR_NOT_IMPLEMENTED;
   },
-  setUploadStream: function(aStream, aContentType, aContentLength) {
+  setUploadStream(aStream, aContentType, aContentLength) {
     this._uploadStream = aStream;
   },
 
@@ -105,10 +102,10 @@ CustomChannel.prototype = {
   set contentLength(val) {
     throw Cr.NS_ERROR_NOT_IMPLEMENTED;
   },
-  open: function() {
+  open() {
     throw Cr.NS_ERROR_NOT_IMPLEMENTED;
   },
-  asyncOpen: function(aListener) {
+  asyncOpen(aListener) {
     var data = `
 <!DOCTYPE html>
 <html>
@@ -188,13 +185,13 @@ document.getElementById('form').submit();
   get name() {
     return this.uri.spec;
   },
-  isPending: function() {
+  isPending() {
     return false;
   },
   get status() {
     return Cr.NS_OK;
   },
-  cancel: function(status) {},
+  cancel(status) {},
   loadGroup: null,
   loadFlags:
     Ci.nsIRequest.LOAD_NORMAL |

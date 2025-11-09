@@ -30,7 +30,6 @@ function test_too_long() {
     // we have passed the test.
     var newURI = ios.newURI(spec);
   } catch (e) {
-    return;
   }
 }
 

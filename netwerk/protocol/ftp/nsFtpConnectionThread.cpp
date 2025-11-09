@@ -73,6 +73,9 @@ nsFtpState::nsFtpState()
       mAnonymous(true),
       mRetryPass(false),
       mStorReplyReceived(false),
+      mRlist1xxReceived(false),
+      mRretr1xxReceived(false),
+      mRstor1xxReceived(false),
       mInternalError(NS_OK),
       mReconnectAndLoginAgain(false),
       mCacheConnection(true),
@@ -253,7 +256,7 @@ nsresult nsFtpState::EstablishControlConnection() {
       mTryingCachedControl = true;
 
       // we have to set charset to connection if server supports utf-8
-      if (mUseUTF8) mChannel->SetContentCharset(NS_LITERAL_CSTRING("UTF-8"));
+      if (mUseUTF8) mChannel->SetContentCharset("UTF-8"_ns);
 
       // we're already connected to this server, skip login.
       mState = FTP_S_PASV;
@@ -659,7 +662,7 @@ nsresult nsFtpState::S_user() {
       if (!prompter) return NS_ERROR_NOT_INITIALIZED;
 
       RefPtr<nsAuthInformationHolder> info = new nsAuthInformationHolder(
-          nsIAuthInformation::AUTH_HOST, EmptyString(), EmptyCString());
+          nsIAuthInformation::AUTH_HOST, u""_ns, ""_ns);
 
       bool retval;
       rv = prompter->PromptAuth(mChannel, nsIAuthPrompt2::LEVEL_NONE, info,
@@ -742,7 +745,7 @@ nsresult nsFtpState::S_pass() {
 
       RefPtr<nsAuthInformationHolder> info = new nsAuthInformationHolder(
           nsIAuthInformation::AUTH_HOST | nsIAuthInformation::ONLY_PASSWORD,
-          EmptyString(), EmptyCString());
+          u""_ns, ""_ns);
 
       info->SetUserInternal(mUsername);
 
@@ -794,7 +797,7 @@ nsFtpState::R_pass() {
 }
 
 nsresult nsFtpState::S_pwd() {
-  return SendFTPCommand(NS_LITERAL_CSTRING("PWD" CRLF));
+  return SendFTPCommand(nsLiteralCString("PWD" CRLF));
 }
 
 FTP_STATE
@@ -819,7 +822,7 @@ nsFtpState::R_pwd() {
 }
 
 nsresult nsFtpState::S_syst() {
-  return SendFTPCommand(NS_LITERAL_CSTRING("SYST" CRLF));
+  return SendFTPCommand(nsLiteralCString("SYST" CRLF));
 }
 
 FTP_STATE
@@ -861,7 +864,7 @@ nsFtpState::R_syst() {
 }
 
 nsresult nsFtpState::S_acct() {
-  return SendFTPCommand(NS_LITERAL_CSTRING("ACCT noaccount" CRLF));
+  return SendFTPCommand(nsLiteralCString("ACCT noaccount" CRLF));
 }
 
 FTP_STATE
@@ -872,7 +875,7 @@ nsFtpState::R_acct() {
 }
 
 nsresult nsFtpState::S_type() {
-  return SendFTPCommand(NS_LITERAL_CSTRING("TYPE I" CRLF));
+  return SendFTPCommand(nsLiteralCString("TYPE I" CRLF));
 }
 
 FTP_STATE
@@ -1016,7 +1019,7 @@ nsresult nsFtpState::SetContentType() {
     }
   }
   return mChannel->SetContentType(
-      NS_LITERAL_CSTRING(APPLICATION_HTTP_INDEX_FORMAT));
+      nsLiteralCString(APPLICATION_HTTP_INDEX_FORMAT));
 }
 
 nsresult nsFtpState::S_list() {
@@ -1038,7 +1041,7 @@ nsresult nsFtpState::S_list() {
   // dir listings aren't resumable
   NS_ENSURE_TRUE(!mChannel->ResumeRequested(), NS_ERROR_NOT_RESUMABLE);
 
-  mChannel->SetEntityID(EmptyCString());
+  mChannel->SetEntityID(""_ns);
 
   const char* listString;
   if (mServerType == FTP_VMS_TYPE) {
@@ -1053,15 +1056,18 @@ nsresult nsFtpState::S_list() {
 FTP_STATE
 nsFtpState::R_list() {
   if (mResponseCode / 100 == 1) {
+    mRlist1xxReceived = true;
+
     // OK, time to start reading from the data connection.
     if (mDataStream && HasPendingCallback())
       mDataStream->AsyncWait(this, 0, 0, CallbackTarget());
     return FTP_READ_BUF;
   }
 
-  if (mResponseCode / 100 == 2) {
+  if (mResponseCode / 100 == 2 && mRlist1xxReceived) {
     //(DONE)
     mNextState = FTP_COMPLETE;
+    mRlist1xxReceived = false;
     return FTP_COMPLETE;
   }
   return FTP_ERROR;
@@ -1080,12 +1086,20 @@ nsresult nsFtpState::S_retr() {
 FTP_STATE
 nsFtpState::R_retr() {
   if (mResponseCode / 100 == 2) {
+    if (!mRretr1xxReceived)
+      return FTP_ERROR;
+
     //(DONE)
     mNextState = FTP_COMPLETE;
+    mRretr1xxReceived = false;
     return FTP_COMPLETE;
   }
 
   if (mResponseCode / 100 == 1) {
+    mChannel->SetContentType(NS_LITERAL_CSTRING(APPLICATION_OCTET_STREAM));
+
+    mRretr1xxReceived = true;
+
     if (mDataStream && HasPendingCallback())
       mDataStream->AsyncWait(this, 0, 0, CallbackTarget());
     return FTP_READ_BUF;
@@ -1117,7 +1131,7 @@ FTP_STATE
 nsFtpState::R_rest() {
   if (mResponseCode / 100 == 4) {
     // If REST fails, then we can't resume
-    mChannel->SetEntityID(EmptyCString());
+    mChannel->SetEntityID(""_ns);
 
     mInternalError = NS_ERROR_NOT_RESUMABLE;
     mResponseMsg.Truncate();
@@ -1154,10 +1168,11 @@ nsresult nsFtpState::S_stor() {
 
 FTP_STATE
 nsFtpState::R_stor() {
-  if (mResponseCode / 100 == 2) {
+  if (mResponseCode / 100 == 2 && mRstor1xxReceived) {
     //(DONE)
     mNextState = FTP_COMPLETE;
     mStorReplyReceived = true;
+    mRstor1xxReceived = false;
 
     // Call Close() if it was not called in nsFtpState::OnStoprequest()
     if (!mUploadRequest && !IsClosed()) Close();
@@ -1167,6 +1182,7 @@ nsFtpState::R_stor() {
 
   if (mResponseCode / 100 == 1) {
     LOG(("FTP:(%p) writing on DT\n", this));
+    mRstor1xxReceived = true;
     return FTP_READ_BUF;
   }
 
@@ -1408,15 +1424,15 @@ nsFtpState::R_pasv() {
 }
 
 nsresult nsFtpState::S_feat() {
-  return SendFTPCommand(NS_LITERAL_CSTRING("FEAT" CRLF));
+  return SendFTPCommand(nsLiteralCString("FEAT" CRLF));
 }
 
 FTP_STATE
 nsFtpState::R_feat() {
   if (mResponseCode / 100 == 2) {
-    if (mResponseMsg.Find(NS_LITERAL_CSTRING(CRLF " UTF8" CRLF), true) > -1) {
+    if (mResponseMsg.Find(nsLiteralCString(CRLF " UTF8" CRLF), true) > -1) {
       // This FTP server supports UTF-8 encoding
-      mChannel->SetContentCharset(NS_LITERAL_CSTRING("UTF-8"));
+      mChannel->SetContentCharset("UTF-8"_ns);
       mUseUTF8 = true;
       return FTP_S_OPTS;
     }
@@ -1428,7 +1444,7 @@ nsFtpState::R_feat() {
 
 nsresult nsFtpState::S_opts() {
   // This command is for compatibility of old FTP spec (IETF Draft)
-  return SendFTPCommand(NS_LITERAL_CSTRING("OPTS UTF8 ON" CRLF));
+  return SendFTPCommand(nsLiteralCString("OPTS UTF8 ON" CRLF));
 }
 
 FTP_STATE
@@ -1632,8 +1648,7 @@ nsresult nsFtpState::SendFTPCommand(const nsACString& command) {
 
   // we don't want to log the password:
   nsAutoCString logcmd(command);
-  if (StringBeginsWith(command, NS_LITERAL_CSTRING("PASS ")))
-    logcmd = "PASS xxxxx";
+  if (StringBeginsWith(command, "PASS "_ns)) logcmd = "PASS xxxxx";
 
   LOG(("FTP:(%p) writing \"%s\"\n", this, logcmd.get()));
 
@@ -1838,7 +1853,7 @@ nsFtpState::CloseWithStatus(nsresult status) {
 
   // Shutdown the control connection processing if we are being closed with an
   // error.  Note: This method may be called several times.
-  if (!IsClosed() && status != NS_BASE_STREAM_CLOSED && NS_FAILED(status)) {
+  if (!IsClosed() && NS_FAILED(status)) {
     if (NS_SUCCEEDED(mInternalError)) mInternalError = status;
     StopProcessing();
   }

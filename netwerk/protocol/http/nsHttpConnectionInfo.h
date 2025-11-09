@@ -31,6 +31,7 @@ namespace mozilla {
 namespace net {
 
 extern LazyLogModule gHttpLog;
+class HttpConnectionInfoCloneArgs;
 
 class nsHttpConnectionInfo final : public ARefBase {
  public:
@@ -50,6 +51,12 @@ class nsHttpConnectionInfo final : public ARefBase {
                        nsProxyInfo* proxyInfo,
                        const OriginAttributes& originAttributes,
                        const nsACString& routedHost, int32_t routedPort);
+
+  static void SerializeHttpConnectionInfo(nsHttpConnectionInfo* aInfo,
+                                          HttpConnectionInfoCloneArgs& aArgs);
+  static already_AddRefed<nsHttpConnectionInfo>
+  DeserializeHttpConnectionInfoCloneArgs(
+      const HttpConnectionInfoCloneArgs& aInfoArgs);
 
  private:
   virtual ~nsHttpConnectionInfo() {
@@ -192,7 +199,8 @@ class nsHttpConnectionInfo final : public ARefBase {
   }
 
  private:
-  // These constructor versions are intended to only be used from Clone().
+  // These constructor versions are intended to be used from Clone() and
+  // DeserializeHttpConnectionInfoCloneArgs().
   nsHttpConnectionInfo(const nsACString& originHost, int32_t originPort,
                        const nsACString& npnToken, const nsACString& username,
                        const nsACString& topWindowOrigin,

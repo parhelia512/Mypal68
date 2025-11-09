@@ -22,7 +22,8 @@ class DNSRequestChild final : public PDNSRequestChild, public nsICancelable {
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSICANCELABLE
 
-  DNSRequestChild(const nsACString& aHost, const uint16_t& aType,
+  DNSRequestChild(const nsACString& aHost, const nsACString& aTrrServer,
+                  const uint16_t& aType,
                   const OriginAttributes& aOriginAttributes,
                   const uint32_t& aFlags, nsIDNSListener* aListener,
                   nsIEventTarget* target);
@@ -30,7 +31,6 @@ class DNSRequestChild final : public PDNSRequestChild, public nsICancelable {
   // Sends IPDL request to parent
   void StartRequest();
   void CallOnLookupComplete();
-  void CallOnLookupByTypeComplete();
 
  protected:
   friend class CancelDNSRequestEvent;
@@ -43,15 +43,9 @@ class DNSRequestChild final : public PDNSRequestChild, public nsICancelable {
   nsCOMPtr<nsIDNSListener> mListener;
   nsCOMPtr<nsIEventTarget> mTarget;
   nsCOMPtr<nsIDNSRecord> mResultRecord;
-  nsCOMPtr<nsIDNSByTypeRecord>
-      mResultByTypeRecords;  // the result of a by-type
-                             // query (mType must not be
-                             // equal to
-                             // nsIDNSService::RESOLVE_TYPE_DEFAULT
-                             // (this is reserved for
-                             // the standard A/AAAA query)).
   nsresult mResultStatus;
   nsCString mHost;
+  nsCString mTrrServer;
   uint16_t mType;
   const OriginAttributes mOriginAttributes;
   uint16_t mFlags;

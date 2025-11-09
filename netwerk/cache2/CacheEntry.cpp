@@ -29,8 +29,7 @@
 #include <math.h>
 #include <algorithm>
 
-namespace mozilla {
-namespace net {
+namespace mozilla::net {
 
 static uint32_t const ENTRY_WANTED = nsICacheEntryOpenCallback::ENTRY_WANTED;
 static uint32_t const RECHECK_AFTER_WRITE_FINISHED =
@@ -113,8 +112,8 @@ CacheEntry::Callback::Callback(CacheEntry* aEntry,
       mRecheckAfterWrite(false),
       mNotWanted(false),
       mSecret(false),
-      mDoomWhenFoundPinned(aDoomWhenFoundInPinStatus == true),
-      mDoomWhenFoundNonPinned(aDoomWhenFoundInPinStatus == false) {
+      mDoomWhenFoundPinned(aDoomWhenFoundInPinStatus),
+      mDoomWhenFoundNonPinned(!aDoomWhenFoundInPinStatus) {
   MOZ_COUNT_CTOR(CacheEntry::Callback);
   MOZ_ASSERT(mEntry->HandlesCount());
   mEntry->AddHandleRef();
@@ -256,7 +255,7 @@ nsresult CacheEntry::HashingKeyWithStorage(nsACString& aResult) const {
 }
 
 nsresult CacheEntry::HashingKey(nsACString& aResult) const {
-  return HashingKey(EmptyCString(), mEnhanceID, mURI, aResult);
+  return HashingKey(""_ns, mEnhanceID, mURI, aResult);
 }
 
 // static
@@ -571,16 +570,18 @@ void CacheEntry::TransferCallbacks(CacheEntry& aFromEntry) {
 
   LOG(("CacheEntry::TransferCallbacks [entry=%p, from=%p]", this, &aFromEntry));
 
-  if (!mCallbacks.Length())
+  if (!mCallbacks.Length()) {
     mCallbacks.SwapElements(aFromEntry.mCallbacks);
-  else
+  } else {
     mCallbacks.AppendElements(aFromEntry.mCallbacks);
+  }
 
   uint32_t callbacksLength = mCallbacks.Length();
   if (callbacksLength) {
     // Carry the entry reference (unfortunately, needs to be done manually...)
-    for (uint32_t i = 0; i < callbacksLength; ++i)
+    for (uint32_t i = 0; i < callbacksLength; ++i) {
       mCallbacks[i].ExchangeEntry(this);
+    }
 
     BackgroundOp(Ops::CALLBACKS, true);
   }
@@ -1388,8 +1389,9 @@ nsresult CacheEntry::AsyncDoom(nsICacheEntryDoomCallback* aCallback) {
   {
     mozilla::MutexAutoLock lock(mLock);
 
-    if (mIsDoomed || mDoomCallback)
+    if (mIsDoomed || mDoomCallback) {
       return NS_ERROR_IN_PROGRESS;  // to aggregate have DOOMING state
+    }
 
     RemoveForcedValidity();
 
@@ -1778,8 +1780,9 @@ void CacheEntry::BackgroundOp(uint32_t aOperations, bool aForceAsync) {
   mLock.AssertCurrentThreadOwns();
 
   if (!CacheStorageService::IsOnManagementThread() || aForceAsync) {
-    if (mBackgroundOperations.Set(aOperations))
+    if (mBackgroundOperations.Set(aOperations)) {
       CacheStorageService::Self()->Dispatch(this);
+    }
 
     LOG(("CacheEntry::BackgroundOp this=%p dipatch of %x", this, aOperations));
     return;
@@ -1898,5 +1901,4 @@ size_t CacheEntry::SizeOfIncludingThis(
   return mallocSizeOf(this) + SizeOfExcludingThis(mallocSizeOf);
 }
 
-}  // namespace net
-}  // namespace mozilla
+}  // namespace mozilla::net

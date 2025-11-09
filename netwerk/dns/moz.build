@@ -28,11 +28,12 @@ EXPORTS += [
 EXPORTS.mozilla.net += [
     'ChildDNSService.h',
     'DNS.h',
+    'DNSByTypeRecord.h',
     'DNSListenerProxy.h',
     'DNSRequestChild.h',
     'DNSRequestParent.h',
+    'HTTPSSVC.h',
     'IDNBlocklistUtils.h',
-    'PDNSParams.h',
     'TRRService.h',
 ]
 
@@ -48,6 +49,7 @@ UNIFIED_SOURCES += [
     'DNSRequestChild.cpp',
     'DNSRequestParent.cpp',
     'GetAddrInfo.cpp',
+    'HTTPSSVC.cpp',
     'IDNBlocklistUtils.cpp',
     'nsDNSService2.cpp',
     'nsIDNService.cpp',
@@ -71,6 +73,7 @@ GeneratedFile('etld_data.inc', script='prepare_tlds.py',
 # need to include etld_data.inc
 LOCAL_INCLUDES += [
     '/netwerk/base',
+    '/netwerk/protocol/http',
 ]
 
 USE_LIBS += ['icu']

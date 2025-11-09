@@ -17,8 +17,7 @@
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/net/MozURL.h"
 
-namespace mozilla {
-namespace net {
+namespace mozilla::net {
 
 #define CONTEXT_EVICTION_PREFIX "ce_"
 const uint32_t kContextEvictionPrefixLength =
@@ -51,7 +50,7 @@ nsresult CacheFileContextEvictor::Init(nsIFile* aCacheDirectory) {
     return rv;
   }
 
-  rv = mEntriesDir->AppendNative(NS_LITERAL_CSTRING(ENTRIES_DIR));
+  rv = mEntriesDir->AppendNative(nsLiteralCString(ENTRIES_DIR));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -368,7 +367,7 @@ nsresult CacheFileContextEvictor::LoadEvictInfoFromDisk() {
       continue;
     }
 
-    if (!StringBeginsWith(leaf, NS_LITERAL_CSTRING(CONTEXT_EVICTION_PREFIX))) {
+    if (!StringBeginsWith(leaf, nsLiteralCString(CONTEXT_EVICTION_PREFIX))) {
       continue;
     }
 
@@ -398,12 +397,14 @@ nsresult CacheFileContextEvictor::LoadEvictInfoFromDisk() {
       auto split = decoded.Split('\t');
       MOZ_ASSERT(decoded.CountChar('\t') == 1);
 
-      origin = split.Get(0);
-      decoded = split.Get(1);
+      auto splitIt = split.begin();
+      origin = *splitIt;
+      ++splitIt;
+      decoded = *splitIt;
     }
 
     nsCOMPtr<nsILoadContextInfo> info;
-    if (!NS_LITERAL_CSTRING("*").Equals(decoded)) {
+    if (!"*"_ns.Equals(decoded)) {
       // "*" is indication of 'delete all', info left null will pass
       // to CacheFileContextEvictor::AddContext and clear all the cache data.
       info = CacheFileUtils::ParseKey(decoded);
@@ -439,9 +440,6 @@ nsresult CacheFileContextEvictor::GetContextFile(
     const nsAString& aOrigin, nsIFile** _retval) {
   nsresult rv;
 
-  nsAutoCString leafName;
-  leafName.AssignLiteral(CONTEXT_EVICTION_PREFIX);
-
   nsAutoCString keyPrefix;
   if (aPinned) {
     // Mark pinned context files with a tab char at the start.
@@ -458,16 +456,16 @@ nsresult CacheFileContextEvictor::GetContextFile(
     keyPrefix.Append(NS_ConvertUTF16toUTF8(aOrigin));
   }
 
-  nsAutoCString data64;
-  rv = Base64Encode(keyPrefix, data64);
+  nsAutoCString leafName;
+  leafName.AssignLiteral(CONTEXT_EVICTION_PREFIX);
+
+  rv = Base64EncodeAppend(keyPrefix, leafName);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
   // Replace '/' with '-' since '/' cannot be part of the filename.
-  data64.ReplaceChar('/', '-');
-
-  leafName.Append(data64);
+  leafName.ReplaceChar('/', '-');
 
   nsCOMPtr<nsIFile> file;
   rv = mCacheDirectory->Clone(getter_AddRefs(file));
@@ -607,7 +605,8 @@ void CacheFileContextEvictor::EvictEntries() {
                               mEntries[0]->mOrigin);
       mEntries.RemoveElementAt(0);
       continue;
-    } else if (NS_FAILED(rv)) {
+    }
+    if (NS_FAILED(rv)) {
       LOG(
           ("CacheFileContextEvictor::EvictEntries() - Iterator failed to "
            "provide next hash (shutdown?), keeping eviction info on disk."
@@ -731,5 +730,4 @@ void CacheFileContextEvictor::EvictEntries() {
   MOZ_ASSERT_UNREACHABLE("We should never get here");
 }
 
-}  // namespace net
-}  // namespace mozilla
+}  // namespace mozilla::net

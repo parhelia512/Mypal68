@@ -379,6 +379,11 @@ nsresult nsIOService::LaunchSocketProcess() {
     return NS_OK;
   }
 
+  if (!XRE_IsE10sParentProcess()) {
+    LOG(("nsIOService skipping LaunchSocketProcess because e10s is disabled"));
+    return NS_OK;
+  }
+
   if (!Preferences::GetBool("network.process.enabled", true)) {
     LOG(("nsIOService skipping LaunchSocketProcess because of the pref"));
     return NS_OK;
@@ -418,6 +423,22 @@ void nsIOService::DestroySocketProcess() {
 
 bool nsIOService::SocketProcessReady() {
   return mSocketProcess && mSocketProcess->IsConnected();
+}
+
+static bool sUseSocketProcess = false;
+static bool sUseSocketProcessChecked = false;
+
+bool nsIOService::UseSocketProcess() {
+  if (sUseSocketProcessChecked) {
+    return sUseSocketProcess;
+  }
+
+  sUseSocketProcessChecked = true;
+  if (Preferences::GetBool("network.process.enabled")) {
+    sUseSocketProcess = Preferences::GetBool(
+        "network.http.network_access_on_socket_process.enabled", true);
+  }
+  return sUseSocketProcess;
 }
 
 // static
@@ -793,8 +814,7 @@ already_AddRefed<nsIURI> nsIOService::CreateExposableURI(nsIURI* aURI) {
   nsAutoCString userPass;
   uri->GetUserPass(userPass);
   if (!userPass.IsEmpty()) {
-    DebugOnly<nsresult> rv =
-        NS_MutateURI(uri).SetUserPass(EmptyCString()).Finalize(uri);
+    DebugOnly<nsresult> rv = NS_MutateURI(uri).SetUserPass(""_ns).Finalize(uri);
     MOZ_ASSERT(NS_SUCCEEDED(rv) && uri, "Mutating URI should never fail");
   }
   return uri.forget();

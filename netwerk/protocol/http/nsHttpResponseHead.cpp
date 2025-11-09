@@ -5,6 +5,7 @@
 // HttpLog.h should generally be included first
 #include "HttpLog.h"
 
+#include "mozilla/Tokenizer.h" //MY
 #include "mozilla/Unused.h"
 #include "nsHttpResponseHead.h"
 #include "nsIHttpHeaderVisitor.h"
@@ -145,7 +146,7 @@ nsresult nsHttpResponseHead::SetHeader(nsHttpAtom hdr, const nsACString& val,
     return NS_ERROR_FAILURE;
   }
 
-  return SetHeader_locked(hdr, EmptyCString(), val, merge);
+  return SetHeader_locked(hdr, ""_ns, val, merge);
 }
 
 nsresult nsHttpResponseHead::SetHeader_locked(nsHttpAtom atom,
@@ -283,7 +284,7 @@ nsresult nsHttpResponseHead::ParseCachedOriginalHeaders(char* block) {
   }
 
   char* p = block;
-  nsHttpAtom hdr = {nullptr};
+  nsHttpAtom hdr;
   nsAutoCString headerNameOriginal;
   nsAutoCString val;
   nsresult rv;
@@ -521,7 +522,7 @@ nsresult nsHttpResponseHead::ParseHeaderLine(const nsACString& line) {
 
 nsresult nsHttpResponseHead::ParseHeaderLine_locked(
     const nsACString& line, bool originalFromNetHeaders) {
-  nsHttpAtom hdr = {nullptr};
+  nsHttpAtom hdr;
   nsAutoCString headerNameOriginal;
   nsAutoCString val;
 
@@ -1072,8 +1073,9 @@ void nsHttpResponseHead::ParseVersion(const char* str) {
 
   LOG(("nsHttpResponseHead::ParseVersion [version=%s]\n", str));
 
+  Tokenizer t(str, nullptr, "");
   // make sure we have HTTP at the beginning
-  if (PL_strncasecmp(str, "HTTP", 4) != 0) {
+  if (!t.CheckWord("HTTP")) {
     if (PL_strncasecmp(str, "ICY ", 4) == 0) {
       // ShoutCast ICY is HTTP/1.0-like. Assume it is HTTP/1.0.
       LOG(("Treating ICY as HTTP 1.0\n"));
@@ -1084,9 +1086,8 @@ void nsHttpResponseHead::ParseVersion(const char* str) {
     mVersion = HttpVersion::v0_9;
     return;
   }
-  str += 4;
 
-  if (*str != '/') {
+  if (!t.CheckChar('/')) {
     LOG(("server did not send a version number; assuming HTTP/1.0\n"));
     // NCSA/1.5.2 has a bug in which it fails to send a version number
     // if the request version is HTTP/1.1, so we fall back on HTTP/1.0
@@ -1094,26 +1095,44 @@ void nsHttpResponseHead::ParseVersion(const char* str) {
     return;
   }
 
-  char* p = PL_strchr(str, '.');
-  if (p == nullptr) {
+  uint32_t major;
+  if (!t.ReadInteger(&major)) {
+    LOG(("server did not send a correct version number; assuming HTTP/1.0"));
+    mVersion = HttpVersion::v1_0;
+    return;
+  }
+
+  if (major == 2) {
+    mVersion = HttpVersion::v2_0;
+    return;
+  }
+
+  if (major != 1) {
+    LOG(("server did not send a correct version number; assuming HTTP/1.0"));
+    mVersion = HttpVersion::v1_0;
+    return;
+  }
+
+  if (!t.CheckChar('.')) {
     LOG(("mal-formed server version; assuming HTTP/1.0\n"));
     mVersion = HttpVersion::v1_0;
     return;
   }
 
-  ++p;  // let b point to the minor version
+  uint32_t minor;
+  if (!t.ReadInteger(&minor)) {
+    LOG(("server did not send a correct version number; assuming HTTP/1.0"));
+    mVersion = HttpVersion::v1_0;
+    return;
+  }
 
-  int major = atoi(str + 1);
-  int minor = atoi(p);
-
-  if ((major > 2) || ((major == 2) && (minor >= 0)))
-    mVersion = HttpVersion::v2_0;
-  else if ((major == 1) && (minor >= 1))
+  if (minor >= 1) {
     // at least HTTP/1.1
     mVersion = HttpVersion::v1_1;
-  else
+  } else {
     // treat anything else as version 1.0
     mVersion = HttpVersion::v1_0;
+  }
 }
 
 void nsHttpResponseHead::ParseCacheControl(const char* val) {
@@ -1193,6 +1212,32 @@ bool nsHttpResponseHead::HasContentType() {
 bool nsHttpResponseHead::HasContentCharset() {
   RecursiveMutexAutoLock monitor(mRecursiveMutex);
   return !mContentCharset.IsEmpty();
+}
+
+bool nsHttpResponseHead::GetContentTypeOptionsHeader(nsACString& aOutput) {
+  aOutput.Truncate();
+
+  nsAutoCString contentTypeOptionsHeader;
+  Unused << GetHeader(nsHttp::X_Content_Type_Options, contentTypeOptionsHeader);
+  if (contentTypeOptionsHeader.IsEmpty()) {
+    // if there is no XCTO header, then there is nothing to do.
+    return false;
+  }
+
+  // XCTO header might contain multiple values which are comma separated, so:
+  // a) let's skip all subsequent values
+  //     e.g. "   NoSniFF   , foo " will be "   NoSniFF   "
+  int32_t idx = contentTypeOptionsHeader.Find(",");
+  if (idx > 0) {
+    contentTypeOptionsHeader = Substring(contentTypeOptionsHeader, 0, idx);
+  }
+  // b) let's trim all surrounding whitespace
+  //    e.g. "   NoSniFF   " -> "NoSniFF"
+  nsHttp::TrimHTTPWhitespace(contentTypeOptionsHeader,
+                             contentTypeOptionsHeader);
+
+  aOutput.Assign(contentTypeOptionsHeader);
+  return true;
 }
 
 }  // namespace net

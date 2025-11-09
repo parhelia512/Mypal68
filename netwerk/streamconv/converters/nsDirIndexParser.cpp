@@ -23,8 +23,6 @@ using namespace mozilla;
 NS_IMPL_ISUPPORTS(nsDirIndexParser, nsIRequestObserver, nsIStreamListener,
                   nsIDirIndexParser)
 
-nsDirIndexParser::nsDirIndexParser() : mLineStart(0), mHasDescription(false) {}
-
 nsresult nsDirIndexParser::Init() {
   mLineStart = 0;
   mHasDescription = false;
@@ -34,10 +32,11 @@ nsresult nsDirIndexParser::Init() {
 
   nsresult rv;
   // XXX not threadsafe
-  if (gRefCntParser++ == 0)
+  if (gRefCntParser++ == 0) {
     rv = CallGetService(NS_ITEXTTOSUBURI_CONTRACTID, &gTextToSubURI);
-  else
+  } else {
     rv = NS_OK;
+  }
 
   return rv;
 }
@@ -92,7 +91,7 @@ NS_IMETHODIMP
 nsDirIndexParser::OnStopRequest(nsIRequest* aRequest, nsresult aStatusCode) {
   // Finish up
   if (mBuf.Length() > (uint32_t)mLineStart) {
-    ProcessData(aRequest, nullptr);
+    ProcessData(aRequest);
   }
 
   return NS_OK;
@@ -108,7 +107,7 @@ nsDirIndexParser::Field nsDirIndexParser::gFieldTable[] = {
     {nullptr, FIELD_UNKNOWN}};
 
 nsrefcnt nsDirIndexParser::gRefCntParser = 0;
-nsITextToSubURI* nsDirIndexParser::gTextToSubURI;
+nsITextToSubURI* nsDirIndexParser::gTextToSubURI = nullptr;
 
 void nsDirIndexParser::ParseFormat(const char* aFormatStr) {
   // Parse a "200" format line, and remember the fields and their
@@ -117,15 +116,17 @@ void nsDirIndexParser::ParseFormat(const char* aFormatStr) {
   mFormat[0] = -1;
 
   do {
-    while (*aFormatStr && nsCRT::IsAsciiSpace(char16_t(*aFormatStr)))
+    while (*aFormatStr && nsCRT::IsAsciiSpace(char16_t(*aFormatStr))) {
       ++aFormatStr;
+    }
 
     if (!*aFormatStr) break;
 
     nsAutoCString name;
     int32_t len = 0;
-    while (aFormatStr[len] && !nsCRT::IsAsciiSpace(char16_t(aFormatStr[len])))
+    while (aFormatStr[len] && !nsCRT::IsAsciiSpace(char16_t(aFormatStr[len]))) {
       ++len;
+    }
     name.Append(aFormatStr, len);
     aFormatStr += len;
 
@@ -252,10 +253,11 @@ void nsDirIndexParser::ParseData(nsIDirIndex* aIdx, char* aDataStr,
       case FIELD_CONTENTLENGTH: {
         int64_t len;
         int32_t status = PR_sscanf(value, "%lld", &len);
-        if (status == 1)
+        if (status == 1) {
           aIdx->SetSize(len);
-        else
+        } else {
           aIdx->SetSize(UINT64_MAX);  // UINT64_MAX means unknown
+        }
       } break;
       case FIELD_LASTMODIFIED: {
         PRTime tm;
@@ -309,11 +311,10 @@ nsDirIndexParser::OnDataAvailable(nsIRequest* aRequest, nsIInputStream* aStream,
   //       work on other strings.
   mBuf.SetLength(len + count);
 
-  return ProcessData(aRequest, nullptr);
+  return ProcessData(aRequest);
 }
 
-nsresult nsDirIndexParser::ProcessData(nsIRequest* aRequest,
-                                       nsISupports* aCtxt) {
+nsresult nsDirIndexParser::ProcessData(nsIRequest* aRequest) {
   if (!mListener) return NS_ERROR_FAILURE;
 
   int32_t numItems = 0;
@@ -343,7 +344,7 @@ nsresult nsDirIndexParser::ProcessData(nsIRequest* aRequest,
 
             char* value = ((char*)buf) + 4;
             nsUnescape(value);
-            mListener->OnInformationAvailable(aRequest, aCtxt,
+            mListener->OnInformationAvailable(aRequest,
                                               NS_ConvertUTF8toUTF16(value));
 
           } else if (buf[2] == '2' && buf[3] == ':') {
@@ -361,7 +362,7 @@ nsresult nsDirIndexParser::ProcessData(nsIRequest* aRequest,
             nsCOMPtr<nsIDirIndex> idx = new nsDirIndex();
 
             ParseData(idx, ((char*)buf) + 4, lineLen - 4);
-            mListener->OnIndexAvailable(aRequest, aCtxt, idx);
+            mListener->OnIndexAvailable(aRequest, idx);
           }
         }
       } else if (buf[0] == '3') {

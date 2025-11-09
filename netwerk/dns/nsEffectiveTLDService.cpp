@@ -235,8 +235,7 @@ nsresult nsEffectiveTLDService::GetBaseDomainInternal(nsCString& aHostname,
   if (result == PR_SUCCESS) {
     // Update the MRU table if in use.
     if (entry) {
-      entry->Set(TLDCacheEntry{aHostname, EmptyCString(),
-                               NS_ERROR_HOST_IS_IP_ADDRESS});
+      entry->Set(TLDCacheEntry{aHostname, ""_ns, NS_ERROR_HOST_IS_IP_ADDRESS});
     }
 
     return NS_ERROR_HOST_IS_IP_ADDRESS;
@@ -258,8 +257,7 @@ nsresult nsEffectiveTLDService::GetBaseDomainInternal(nsCString& aHostname,
     if (*currDomain == '.') {
       // Update the MRU table if in use.
       if (entry) {
-        entry->Set(
-            TLDCacheEntry{aHostname, EmptyCString(), NS_ERROR_INVALID_ARG});
+        entry->Set(TLDCacheEntry{aHostname, ""_ns, NS_ERROR_INVALID_ARG});
       }
 
       return NS_ERROR_INVALID_ARG;
@@ -328,8 +326,8 @@ nsresult nsEffectiveTLDService::GetBaseDomainInternal(nsCString& aHostname,
   if (aAdditionalParts != 0) {
     // Update the MRU table if in use.
     if (entry) {
-      entry->Set(TLDCacheEntry{aHostname, EmptyCString(),
-                               NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS});
+      entry->Set(
+          TLDCacheEntry{aHostname, ""_ns, NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS});
     }
 
     return NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS;

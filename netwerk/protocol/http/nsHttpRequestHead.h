@@ -12,6 +12,13 @@
 
 class nsIHttpHeaderVisitor;
 
+// This needs to be forward declared here so we can include only this header
+// without also including PHttpChannelParams.h
+namespace IPC {
+template <typename>
+struct ParamTraits;
+}  // namespace IPC
+
 namespace mozilla {
 namespace net {
 
@@ -23,7 +30,10 @@ namespace net {
 class nsHttpRequestHead {
  public:
   nsHttpRequestHead();
+  explicit nsHttpRequestHead(const nsHttpRequestHead& aRequestHead);
   ~nsHttpRequestHead();
+
+  nsHttpRequestHead& operator=(const nsHttpRequestHead& aRequestHead);
 
   // The following function is only used in HttpChannelParent to avoid
   // copying headers. If you use it be careful to do it only under
@@ -126,6 +136,8 @@ class nsHttpRequestHead {
 
   // During VisitHeader we sould not allow cal to SetHeader.
   bool mInVisitHeaders;
+
+  friend struct IPC::ParamTraits<nsHttpRequestHead>;
 };
 
 }  // namespace net

@@ -17,6 +17,7 @@
 #include "mozilla/StaticPrefs_privacy.h"
 #include "mozilla/StoragePrincipalHelper.h"
 #include "mozilla/TaskQueue.h"
+#include "nsBufferedStreams.h"
 #include "nsCategoryCache.h"
 #include "nsContentUtils.h"
 #include "nsFileStreams.h"
@@ -126,6 +127,18 @@ nsresult NS_NewLocalFileInputStream(nsIInputStream** result, nsIFile* file,
   return rv;
 }
 
+Result<nsCOMPtr<nsIInputStream>, nsresult> NS_NewLocalFileInputStream(
+    nsIFile* file, int32_t ioFlags /* = -1 */, int32_t perm /* = -1 */,
+    int32_t behaviorFlags /* = 0 */) {
+  nsCOMPtr<nsIInputStream> stream;
+  const nsresult rv = NS_NewLocalFileInputStream(getter_AddRefs(stream), file,
+                                                 ioFlags, perm, behaviorFlags);
+  if (NS_SUCCEEDED(rv)) {
+    return stream;
+  }
+  return Err(rv);
+}
+
 nsresult NS_NewLocalFileOutputStream(nsIOutputStream** result, nsIFile* file,
                                      int32_t ioFlags /* = -1 */,
                                      int32_t perm /* = -1 */,
@@ -138,6 +151,18 @@ nsresult NS_NewLocalFileOutputStream(nsIOutputStream** result, nsIFile* file,
     if (NS_SUCCEEDED(rv)) out.forget(result);
   }
   return rv;
+}
+
+Result<nsCOMPtr<nsIOutputStream>, nsresult> NS_NewLocalFileOutputStream(
+    nsIFile* file, int32_t ioFlags /* = -1 */, int32_t perm /* = -1 */,
+    int32_t behaviorFlags /* = 0 */) {
+  nsCOMPtr<nsIOutputStream> stream;
+  const nsresult rv = NS_NewLocalFileOutputStream(getter_AddRefs(stream), file,
+                                                  ioFlags, perm, behaviorFlags);
+  if (NS_SUCCEEDED(rv)) {
+    return stream;
+  }
+  return Err(rv);
 }
 
 nsresult net_EnsureIOService(nsIIOService** ios, nsCOMPtr<nsIIOService>& grip) {
@@ -190,7 +215,7 @@ nsresult NS_GetURIWithNewRef(nsIURI* aInput, const nsACString& aRef,
 }
 
 nsresult NS_GetURIWithoutRef(nsIURI* aInput, nsIURI** aOutput) {
-  return NS_GetURIWithNewRef(aInput, EmptyCString(), aOutput);
+  return NS_GetURIWithNewRef(aInput, ""_ns, aOutput);
 }
 
 nsresult NS_NewChannelInternal(
@@ -701,8 +726,8 @@ nsresult NS_NewInputStreamChannel(
     nsIChannel** outChannel, nsIURI* aUri,
     already_AddRefed<nsIInputStream> aStream, nsIPrincipal* aLoadingPrincipal,
     nsSecurityFlags aSecurityFlags, nsContentPolicyType aContentPolicyType,
-    const nsACString& aContentType /* = EmptyCString() */,
-    const nsACString& aContentCharset /* = EmptyCString() */) {
+    const nsACString& aContentType /* = ""_ns */,
+    const nsACString& aContentCharset /* = ""_ns */) {
   nsCOMPtr<nsIInputStream> stream = aStream;
   return NS_NewInputStreamChannelInternal(outChannel, aUri, stream.forget(),
                                           aContentType, aContentCharset,
@@ -1049,8 +1074,8 @@ nsresult NS_NewProxyInfo(const nsACString& type, const nsACString& host,
   nsCOMPtr<nsIProtocolProxyService> pps =
       do_GetService(NS_PROTOCOLPROXYSERVICE_CONTRACTID, &rv);
   if (NS_SUCCEEDED(rv))
-    rv = pps->NewProxyInfo(type, host, port, EmptyCString(), EmptyCString(),
-                           flags, UINT32_MAX, nullptr, result);
+    rv = pps->NewProxyInfo(type, host, port, ""_ns, ""_ns, flags, UINT32_MAX,
+                           nullptr, result);
   return rv;
 }
 
@@ -1230,6 +1255,18 @@ nsresult NS_NewLocalFileStream(nsIFileStream** result, nsIFile* file,
   return rv;
 }
 
+mozilla::Result<nsCOMPtr<nsIFileStream>, nsresult> NS_NewLocalFileStream(
+    nsIFile* file, int32_t ioFlags /* = -1 */, int32_t perm /* = -1 */,
+    int32_t behaviorFlags /* = 0 */) {
+  nsCOMPtr<nsIFileStream> stream;
+  const nsresult rv = NS_NewLocalFileStream(getter_AddRefs(stream), file,
+                                            ioFlags, perm, behaviorFlags);
+  if (NS_SUCCEEDED(rv)) {
+    return stream;
+  }
+  return Err(rv);
+}
+
 nsresult NS_NewBufferedOutputStream(
     nsIOutputStream** aResult, already_AddRefed<nsIOutputStream> aOutputStream,
     uint32_t aBufferSize) {
@@ -1247,14 +1284,14 @@ nsresult NS_NewBufferedOutputStream(
   return rv;
 }
 
-MOZ_MUST_USE nsresult NS_NewBufferedInputStream(
+[[nodiscard]] nsresult NS_NewBufferedInputStream(
     nsIInputStream** aResult, already_AddRefed<nsIInputStream> aInputStream,
     uint32_t aBufferSize) {
   nsCOMPtr<nsIInputStream> inputStream = std::move(aInputStream);
 
-  nsresult rv;
-  nsCOMPtr<nsIBufferedInputStream> in =
-      do_CreateInstance(NS_BUFFEREDINPUTSTREAM_CONTRACTID, &rv);
+  nsCOMPtr<nsIBufferedInputStream> in;
+  nsresult rv = nsBufferedInputStream::Create(
+      nullptr, NS_GET_IID(nsIBufferedInputStream), getter_AddRefs(in));
   if (NS_SUCCEEDED(rv)) {
     rv = in->Init(inputStream, aBufferSize);
     if (NS_SUCCEEDED(rv)) {
@@ -1264,6 +1301,17 @@ MOZ_MUST_USE nsresult NS_NewBufferedInputStream(
     }
   }
   return rv;
+}
+
+Result<nsCOMPtr<nsIInputStream>, nsresult> NS_NewBufferedInputStream(
+    already_AddRefed<nsIInputStream> aInputStream, uint32_t aBufferSize) {
+  nsCOMPtr<nsIInputStream> stream;
+  const nsresult rv = NS_NewBufferedInputStream(
+      getter_AddRefs(stream), std::move(aInputStream), aBufferSize);
+  if (NS_SUCCEEDED(rv)) {
+    return stream;
+  }
+  return Err(rv);
 }
 
 namespace {
@@ -2585,7 +2633,7 @@ uint32_t NS_GetContentDispositionFromHeader(const nsACString& aHeader,
   if (NS_FAILED(rv)) return nsIChannel::DISPOSITION_ATTACHMENT;
 
   nsAutoString dispToken;
-  rv = mimehdrpar->GetParameterHTTP(aHeader, "", EmptyCString(), true, nullptr,
+  rv = mimehdrpar->GetParameterHTTP(aHeader, "", ""_ns, true, nullptr,
                                     dispToken);
 
   if (NS_FAILED(rv)) {
@@ -2608,8 +2656,8 @@ nsresult NS_GetFilenameFromDisposition(nsAString& aFilename,
   if (NS_FAILED(rv)) return rv;
 
   // Get the value of 'filename' parameter
-  rv = mimehdrpar->GetParameterHTTP(aDisposition, "filename", EmptyCString(),
-                                    true, nullptr, aFilename);
+  rv = mimehdrpar->GetParameterHTTP(aDisposition, "filename", ""_ns, true,
+                                    nullptr, aFilename);
 
   if (NS_FAILED(rv)) {
     aFilename.Truncate();
@@ -2787,12 +2835,12 @@ nsresult NS_ShouldSecureUpgrade(
           uint32_t innerWindowId = aLoadInfo->GetInnerWindowID();
           CSP_LogLocalizedStr(
               "upgradeInsecureRequest", params,
-              EmptyString(),  // aSourceFile
-              EmptyString(),  // aScriptSample
-              0,              // aLineNumber
-              0,              // aColumnNumber
-              nsIScriptError::warningFlag,
-              NS_LITERAL_CSTRING("upgradeInsecureRequest"), innerWindowId,
+              u""_ns,  // aSourceFile
+              u""_ns,  // aScriptSample
+              0,       // aLineNumber
+              0,       // aColumnNumber
+              nsIScriptError::warningFlag, "upgradeInsecureRequest"_ns,
+              innerWindowId,
               !!aLoadInfo->GetOriginAttributes().mPrivateBrowsingId);
         } else {
           RefPtr<dom::Document> doc;

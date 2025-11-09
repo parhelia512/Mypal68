@@ -15,7 +15,6 @@
 #include "nsIChannelEventSink.h"
 #include "nsCategoryCache.h"
 #include "nsISpeculativeConnect.h"
-#include "nsDataHashtable.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "prtime.h"
@@ -119,6 +118,7 @@ class nsIOService final : public nsIIOService,
   bool SocketProcessReady();
   static void NotifySocketProcessPrefsChanged(const char* aName, void* aSelf);
   void NotifySocketProcessPrefsChanged(const char* aName);
+  bool UseSocketProcess();
 
   bool IsSocketProcessLaunchComplete();
 

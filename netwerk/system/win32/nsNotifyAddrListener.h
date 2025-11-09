@@ -12,6 +12,7 @@
 #include "nsIObserver.h"
 #include "nsThreadUtils.h"
 #include "nsCOMPtr.h"
+#include "mozilla/Atomics.h"
 #include "mozilla/TimeStamp.h"
 
 class nsNotifyAddrListener : public nsINetworkLinkService,
@@ -75,6 +76,9 @@ class nsNotifyAddrListener : public nsINetworkLinkService,
 
   // set true when mCheckEvent means shutdown
   bool mShutdown;
+
+  // If a VPN was detected on at least one active network interface.
+  mozilla::Atomic<bool, mozilla::MemoryOrdering::Relaxed> mFoundVPN;
 
   // This is a checksum of various meta data for all network interfaces
   // considered UP at last check.

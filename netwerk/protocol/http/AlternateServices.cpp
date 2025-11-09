@@ -18,6 +18,7 @@
 #include "nsIWellKnownOpportunisticUtils.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/dom/PContent.h"
+#include "mozilla/SyncRunnable.h"
 
 /* RFC 7838 Alternative Services
    http://httpwg.org/http-extensions/opsec.html
@@ -126,7 +127,7 @@ void AltSvcMapping::ProcessHeader(
       originAttributes.CreateSuffix(suffix);
       LOG(("Alt Svc clearing mapping for %s:%d:%s", originHost.get(),
            originPort, suffix.get()));
-      gHttpHandler->ConnMgr()->ClearHostMapping(
+      gHttpHandler->AltServiceCache()->ClearHostMapping(
           originHost, originPort, originAttributes, topWindowOrigin);
       continue;
     }
@@ -150,16 +151,17 @@ void AltSvcMapping::ProcessHeader(
     }
 
     RefPtr<AltSvcMapping> mapping = new AltSvcMapping(
-        gHttpHandler->ConnMgr()->GetStoragePtr(),
-        gHttpHandler->ConnMgr()->StorageEpoch(), originScheme, originHost,
-        originPort, username, topWindowOrigin, privateBrowsing, isolated,
-        NowInSeconds() + maxage, hostname, portno, npnToken, originAttributes);
+        gHttpHandler->AltServiceCache()->GetStoragePtr(),
+        gHttpHandler->AltServiceCache()->StorageEpoch(), originScheme,
+        originHost, originPort, username, topWindowOrigin, privateBrowsing,
+        isolated, NowInSeconds() + maxage, hostname, portno, npnToken,
+        originAttributes);
     if (mapping->TTL() <= 0) {
       LOG(("Alt Svc invalid map"));
       mapping = nullptr;
       // since this isn't a parse error, let's clear any existing mapping
       // as that would have happened if we had accepted the parameters.
-      gHttpHandler->ConnMgr()->ClearHostMapping(
+      gHttpHandler->AltServiceCache()->ClearHostMapping(
           originHost, originPort, originAttributes, topWindowOrigin);
     } else {
       gHttpHandler->UpdateAltServiceMapping(mapping, proxyInfo, callbacks, caps,
@@ -339,7 +341,7 @@ void AltSvcMapping::GetConnectionInfo(
 
 void AltSvcMapping::Serialize(nsCString& out) {
   // Be careful, when serializing new members, add them to the end of this list.
-  out = mHttps ? NS_LITERAL_CSTRING("https:") : NS_LITERAL_CSTRING("http:");
+  out = mHttps ? "https:"_ns : "http:"_ns;
   out.Append(mOriginHost);
   out.Append(':');
   out.AppendInt(mOriginPort);
@@ -436,11 +438,9 @@ AltSvcMapping::AltSvcMapping(DataStorage* storage, int32_t epoch,
     // Add code to deserialize new members here!
 #undef _NS_NEXT_TOKEN
 
-    MakeHashKey(
-        mHashKey,
-        mHttps ? NS_LITERAL_CSTRING("https") : NS_LITERAL_CSTRING("http"),
-        mOriginHost, mOriginPort, mPrivate, mIsolated, mTopWindowOrigin,
-        mOriginAttributes);
+    MakeHashKey(mHashKey, mHttps ? "https"_ns : "http"_ns, mOriginHost,
+                mOriginPort, mPrivate, mIsolated, mTopWindowOrigin,
+                mOriginAttributes);
   } while (false);
 }
 
@@ -734,45 +734,28 @@ TransactionObserver::TransactionObserver(nsHttpChannel* channel,
     : mChannel(channel),
       mChecker(checker),
       mRanOnce(false),
+      mStatusOK(false),
       mAuthOK(false),
-      mVersionOK(false),
-      mStatusOK(false) {
+      mVersionOK(false) {
   LOG(("TransactionObserver ctor %p channel %p checker %p\n", this, channel,
        checker));
   mChannelRef = do_QueryInterface((nsIHttpChannel*)channel);
 }
 
-void TransactionObserver::Complete(nsHttpTransaction* aTrans, nsresult reason) {
-  // socket thread
-  MOZ_ASSERT(!NS_IsMainThread());
+void TransactionObserver::Complete(bool versionOK, bool authOK,
+                                   nsresult reason) {
   if (mRanOnce) {
     return;
   }
   mRanOnce = true;
 
-  RefPtr<nsAHttpConnection> conn = aTrans->Connection();
-  LOG(("TransactionObserver::Complete %p aTrans %p reason %" PRIx32
-       " conn %p\n",
-       this, aTrans, static_cast<uint32_t>(reason), conn.get()));
-  if (!conn) {
-    return;
-  }
-  HttpVersion version = conn->Version();
-  mVersionOK = (((reason == NS_BASE_STREAM_CLOSED) || (reason == NS_OK)) &&
-                conn->Version() == HttpVersion::v2_0);
+  mVersionOK = versionOK;
+  mAuthOK = authOK;
 
-  nsCOMPtr<nsISupports> secInfo;
-  conn->GetSecurityInfo(getter_AddRefs(secInfo));
-  nsCOMPtr<nsISSLSocketControl> socketControl = do_QueryInterface(secInfo);
-  LOG(("TransactionObserver::Complete version %u socketControl %p\n",
-       static_cast<int32_t>(version), socketControl.get()));
-  if (!socketControl) {
-    return;
-  }
-
-  mAuthOK = !socketControl->GetFailedVerification();
-  LOG(("TransactionObserve::Complete %p trans %p authOK %d versionOK %d\n",
-       this, aTrans, mAuthOK, mVersionOK));
+  LOG(
+      ("TransactionObserve::Complete %p authOK %d versionOK %d"
+       " reason %" PRIx32,
+       this, authOK, versionOK, static_cast<uint32_t>(reason)));
 }
 
 #define MAX_WK 32768
@@ -827,6 +810,45 @@ TransactionObserver::OnStopRequest(nsIRequest* aRequest, nsresult code) {
     mChecker->Done(this);
   }
   return NS_OK;
+}
+
+void AltSvcCache::EnsureStorageInited() {
+  if (mStorage) {
+    return;
+  }
+
+  auto initTask = [&]() {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    // DataStorage gives synchronous access to a memory based hash table
+    // that is backed by disk where those writes are done asynchronously
+    // on another thread
+    mStorage = DataStorage::Get(DataStorageClass::AlternateServices);
+    if (!mStorage) {
+      LOG(("AltSvcCache::EnsureStorageInited WARN NO STORAGE\n"));
+      return;
+    }
+
+    if (NS_FAILED(mStorage->Init(nullptr))) {
+      mStorage = nullptr;
+    }
+
+    mStorageEpoch = NowInSeconds();
+  };
+
+  if (NS_IsMainThread()) {
+    initTask();
+    return;
+  }
+
+  nsCOMPtr<nsIEventTarget> main = GetMainThreadEventTarget();
+  if (!main) {
+    return;
+  }
+
+  SyncRunnable::DispatchToThread(
+      main, new SyncRunnable(NS_NewRunnableFunction(
+                "AltSvcCache::EnsureStorageInited", initTask)));
 }
 
 already_AddRefed<AltSvcMapping> AltSvcCache::LookupMapping(
@@ -963,7 +985,7 @@ void AltSvcCache::UpdateAltServiceMapping(
     }
   } else {
     // for http:// resources we fetch .well-known too
-    nsAutoCString origin(NS_LITERAL_CSTRING("http://"));
+    nsAutoCString origin("http://"_ns);
 
     // Check whether origin is an ipv6 address. In that case we need to add
     // '[]'.
@@ -1005,24 +1027,9 @@ already_AddRefed<AltSvcMapping> AltSvcCache::GetAltServiceMapping(
     const nsACString& scheme, const nsACString& host, int32_t port,
     bool privateBrowsing, bool isolated, const nsACString& topWindowOrigin,
     const OriginAttributes& originAttributes) {
-  bool isHTTPS;
-  MOZ_ASSERT(NS_IsMainThread());
-  if (!mStorage) {
-    // DataStorage gives synchronous access to a memory based hash table
-    // that is backed by disk where those writes are done asynchronously
-    // on another thread
-    mStorage = DataStorage::Get(DataStorageClass::AlternateServices);
-    if (mStorage) {
-      if (NS_FAILED(mStorage->Init(nullptr))) {
-        mStorage = nullptr;
-      }
-    }
-    if (!mStorage) {
-      LOG(("AltSvcCache::GetAltServiceMapping WARN NO STORAGE\n"));
-    }
-    mStorageEpoch = NowInSeconds();
-  }
+  EnsureStorageInited();
 
+  bool isHTTPS;
   if (NS_FAILED(SchemeIsHTTPS(scheme, isHTTPS))) {
     return nullptr;
   }
@@ -1061,8 +1068,8 @@ class ProxyClearHostMapping : public Runnable {
 
   NS_IMETHOD Run() override {
     MOZ_ASSERT(NS_IsMainThread());
-    gHttpHandler->ConnMgr()->ClearHostMapping(mHost, mPort, mOriginAttributes,
-                                              mTopWindowOrigin);
+    gHttpHandler->AltServiceCache()->ClearHostMapping(
+        mHost, mPort, mOriginAttributes, mTopWindowOrigin);
     return NS_OK;
   }
 

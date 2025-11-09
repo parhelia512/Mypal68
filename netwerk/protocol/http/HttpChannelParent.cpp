@@ -76,6 +76,7 @@ HttpChannelParent::HttpChannelParent(const PBrowserOrId& iframeEmbedding,
       mCacheNeedFlowControlInitialized(false),
       mNeedFlowControl(true),
       mSuspendedForFlowControl(false),
+      mAfterOnStartRequestBegun(false),
       mDoingCrossProcessRedirect(false) {
   LOG(("Creating HttpChannelParent [this=%p]\n", this));
 
@@ -1417,6 +1418,8 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
     return NS_ERROR_UNEXPECTED;
   }
 
+  mAfterOnStartRequestBegun = true;
+
   MOZ_ASSERT(mChannel == chan,
              "HttpChannelParent getting OnStartRequest from a different "
              "HttpBaseChannel instance");
@@ -1455,12 +1458,8 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
       httpChannelImpl->GetApplicationCache(getter_AddRefs(appCache));
       nsCString appCacheGroupId;
       nsCString appCacheClientId;
-      appCache->GetGroupID(appCacheGroupId);
-      appCache->GetClientID(appCacheClientId);
-      if (mIPCClosed ||
-          !SendAssociateApplicationCache(appCacheGroupId, appCacheClientId)) {
-        return NS_ERROR_UNEXPECTED;
-      }
+      appCache->GetGroupID(args.appCacheGroupId());
+      appCache->GetClientID(args.appCacheClientId());
     }
   }
 
@@ -1514,6 +1513,9 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
   args.selfAddr() = chan->GetSelfAddr();
   args.peerAddr() = chan->GetPeerAddr();
   args.timing() = GetTimingAttributes(mChannel);
+  if (mOverrideReferrerInfo) {
+    args.overrideReferrerInfo() = ToRefPtr(std::move(mOverrideReferrerInfo));
+  }
 
   nsHttpRequestHead* requestHead = chan->GetRequestHead();
   // !!! We need to lock headers and please don't forget to unlock them !!!
@@ -2515,7 +2517,10 @@ nsresult HttpChannelParent::LogMimeTypeMismatch(const nsACString& aMessageName,
 
 void HttpChannelParent::OverrideReferrerInfoDuringBeginConnect(
     nsIReferrerInfo* aReferrerInfo) {
-  Unused << SendOverrideReferrerInfoDuringBeginConnect(aReferrerInfo);
+  MOZ_ASSERT(aReferrerInfo);
+  MOZ_ASSERT(!mAfterOnStartRequestBegun);
+
+  mOverrideReferrerInfo = aReferrerInfo;
 }
 
 }  // namespace net

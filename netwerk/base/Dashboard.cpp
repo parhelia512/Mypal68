@@ -267,13 +267,6 @@ LookupHelper::OnLookupComplete(nsICancelable* aRequest, nsIDNSRecord* aRecord,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-LookupHelper::OnLookupByTypeComplete(nsICancelable* aRequest,
-                                     nsIDNSByTypeRecord* aRes,
-                                     nsresult aStatus) {
-  return NS_OK;
-}
-
 nsresult LookupHelper::ConstructAnswer(LookupArgument* aArgument) {
   nsIDNSRecord* aRecord = aArgument->mRecord;
   AutoSafeJSContext cx;
@@ -677,6 +670,9 @@ nsresult Dashboard::GetDNSCacheEntries(DnsData* dnsData) {
     } else {
       entry.mFamily.AssignLiteral(u"ipv4");
     }
+
+    entry.mOriginAttributesSuffix =
+        NS_ConvertUTF8toUTF16(dnsData->mData[i].originAttributesSuffix);
   }
 
   JS::RootedValue val(cx);

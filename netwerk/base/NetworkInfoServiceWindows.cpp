@@ -46,7 +46,7 @@ nsresult DoListAddresses(AddrMapType& aAddrMap) {
                             (addrVal >> 8) & 0xff, (addrVal >> 16) & 0xff,
                             (addrVal >> 24) & 0xff);
 
-    aAddrMap.Put(indexString, addrString);
+    aAddrMap.InsertOrUpdate(indexString, addrString);
   }
 
   return NS_OK;

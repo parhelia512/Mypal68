@@ -30,7 +30,6 @@ class Http2PushedStream final : public Http2Stream {
                     Http2Session* aSession, Http2Stream* aAssociatedStream,
                     uint32_t aID,
                     uint64_t aCurrentForegroundTabOuterContentWindowId);
-  virtual ~Http2PushedStream() = default;
 
   bool GetPushComplete();
 
@@ -71,8 +70,10 @@ class Http2PushedStream final : public Http2Stream {
   virtual void TopLevelOuterContentWindowIdChanged(uint64_t) override;
 
   nsCString& GetRequestString() { return mRequestString; }
+  nsCString& GetResourceUrl() { return mResourceUrl; }
 
  private:
+  virtual ~Http2PushedStream() = default;
   Http2Stream*
       mConsumerStream;  // paired request stream that consumes from
                         // real http/2 one.. null until a match is made.
@@ -98,6 +99,7 @@ class Http2PushedStream final : public Http2Stream {
   bool mDeferCleanupOnPush;
   bool mOnPushFailed;
   nsCString mRequestString;
+  nsCString mResourceUrl;
 
   uint32_t mDefaultPriorityDependency;
 };
@@ -138,13 +140,17 @@ class Http2PushedStreamWrapper : public nsISupports {
   explicit Http2PushedStreamWrapper(Http2PushedStream* aPushStream);
 
   nsCString& GetRequestString() { return mRequestString; }
+  nsCString& GetResourceUrl() { return mResourceUrl; }
   Http2PushedStream* GetStream();
   void OnPushFailed();
+  uint32_t StreamID() { return mStreamID; }
 
  private:
   virtual ~Http2PushedStreamWrapper();
 
   nsCString mRequestString;
+  nsCString mResourceUrl;
+  uint32_t mStreamID;
   WeakPtr<Http2Stream> mStream;
 };
 

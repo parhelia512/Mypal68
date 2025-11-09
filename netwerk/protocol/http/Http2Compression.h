@@ -48,7 +48,7 @@ class nvFIFO {
 
  private:
   uint32_t mByteCount;
-  nsDeque mTable;
+  nsDeque<nvPair> mTable;
 };
 
 class HpackDynamicTableReporter;

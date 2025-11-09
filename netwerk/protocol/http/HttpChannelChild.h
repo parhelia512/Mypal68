@@ -137,8 +137,6 @@ class HttpChannelChild final : public PHttpChannelChild,
       const NetAddr& oldPeerAddr,
       const ResourceTimingStructArgs& aTiming) override;
   mozilla::ipc::IPCResult RecvRedirect3Complete() override;
-  mozilla::ipc::IPCResult RecvAssociateApplicationCache(
-      const nsCString& groupID, const nsCString& clientID) override;
   mozilla::ipc::IPCResult RecvDeleteSelf() override;
   mozilla::ipc::IPCResult RecvFinishInterceptedRedirect() override;
 
@@ -162,9 +160,6 @@ class HttpChannelChild final : public PHttpChannelChild,
 
   mozilla::ipc::IPCResult RecvAltDataCacheInputStreamAvailable(
       const Maybe<IPCStream>& aStream) override;
-
-  mozilla::ipc::IPCResult RecvOverrideReferrerInfoDuringBeginConnect(
-      nsIReferrerInfo* aReferrerInfo) override;
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
@@ -273,16 +268,14 @@ class HttpChannelChild final : public PHttpChannelChild,
   bool NeedToReportBytesRead();
   int32_t mUnreportBytesRead = 0;
 
-  void DoOnStartRequest(nsIRequest* aRequest, nsISupports* aContext);
+  void DoOnStartRequest(nsIRequest* aRequest);
   void DoOnStatus(nsIRequest* aRequest, nsresult status);
   void DoOnProgress(nsIRequest* aRequest, int64_t progress,
                     int64_t progressMax);
-  void DoOnDataAvailable(nsIRequest* aRequest, nsISupports* aContext,
-                         nsIInputStream* aStream, uint64_t offset,
-                         uint32_t count);
+  void DoOnDataAvailable(nsIRequest* aRequest, nsIInputStream* aStream,
+                         uint64_t offset, uint32_t count);
   void DoPreOnStopRequest(nsresult aStatus);
-  void DoOnStopRequest(nsIRequest* aRequest, nsresult aChannelStatus,
-                       nsISupports* aContext);
+  void DoOnStopRequest(nsIRequest* aRequest, nsresult aChannelStatus);
 
   bool ShouldInterceptURI(nsIURI* aURI, bool& aShouldUpgrade);
 

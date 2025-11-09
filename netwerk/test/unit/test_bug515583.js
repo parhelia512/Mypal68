@@ -54,10 +54,10 @@ function storeData(status, entry) {
     URI: url,
     contentLength: -1,
     pending: true,
-    isPending: function() {
+    isPending() {
       return this.pending;
     },
-    QueryInterface: ChromeUtils.generateQI([Ci.nsIChannel]),
+    QueryInterface: ChromeUtils.generateQI(["nsIChannel"]),
   };
 
   converter.onStartRequest(channel, null);

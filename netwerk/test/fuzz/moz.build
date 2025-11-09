@@ -4,6 +4,7 @@
 
 UNIFIED_SOURCES += [
     'TestHttpFuzzing.cpp',
+    'TestWebsocketFuzzing.cpp',
 ]
 
 LOCAL_INCLUDES += [

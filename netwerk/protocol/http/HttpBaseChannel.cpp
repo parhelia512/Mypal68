@@ -379,6 +379,7 @@ nsresult HttpBaseChannel::Init(nsIURI* aURI, uint32_t aCaps,
       !type.EqualsLiteral("unknown"))
     mProxyInfo = aProxyInfo;
 
+  mCurrentThread = GetCurrentSerialEventTarget();
   return rv;
 }
 
@@ -470,8 +471,7 @@ HttpBaseChannel::SetLoadFlags(nsLoadFlags aLoadFlags) {
 
 NS_IMETHODIMP
 HttpBaseChannel::SetDocshellUserAgentOverride() {
-  // This sets the docshell specific user agent override, it will be overwritten
-  // by UserAgentOverrides.jsm if site-specific user agent overrides are set.
+  // This sets the docshell specific user agent override
   nsresult rv;
   nsCOMPtr<nsILoadContext> loadContext;
   NS_QueryNotificationCallbacks(this, loadContext);
@@ -498,8 +498,7 @@ HttpBaseChannel::SetDocshellUserAgentOverride() {
   }
 
   NS_ConvertUTF16toUTF8 utf8CustomUserAgent(customUserAgent);
-  rv = SetRequestHeader(NS_LITERAL_CSTRING("User-Agent"), utf8CustomUserAgent,
-                        false);
+  rv = SetRequestHeader("User-Agent"_ns, utf8CustomUserAgent, false);
   if (NS_FAILED(rv)) return rv;
 
   return NS_OK;
@@ -2152,26 +2151,14 @@ nsresult ProcessXCTO(HttpBaseChannel* aChannel, nsIURI* aURI,
 
   // 1) Query the XCTO header and check if 'nosniff' is the first value.
   nsAutoCString contentTypeOptionsHeader;
-  Unused << aResponseHead->GetHeader(nsHttp::X_Content_Type_Options,
-                                     contentTypeOptionsHeader);
-  if (contentTypeOptionsHeader.IsEmpty()) {
-    // if there is no XCTO header, then there is nothing to do.
+  if (!aResponseHead->GetContentTypeOptionsHeader(contentTypeOptionsHeader)) {
+    // if failed to get XCTO header, then there is nothing to do.
     return NS_OK;
   }
-  // XCTO header might contain multiple values which are comma separated, so:
-  // a) let's skip all subsequent values
-  //     e.g. "   NoSniFF   , foo " will be "   NoSniFF   "
-  int32_t idx = contentTypeOptionsHeader.Find(",");
-  if (idx > 0) {
-    contentTypeOptionsHeader = Substring(contentTypeOptionsHeader, 0, idx);
-  }
-  // b) let's trim all surrounding whitespace
-  //    e.g. "   NoSniFF   " -> "NoSniFF"
-  nsHttp::TrimHTTPWhitespace(contentTypeOptionsHeader,
-                             contentTypeOptionsHeader);
-  // c) let's compare the header (ignoring case)
-  //    e.g. "NoSniFF" -> "nosniff"
-  //    if it's not 'nosniff' then there is nothing to do here
+
+  // let's compare the header (ignoring case)
+  // e.g. "NoSniFF" -> "nosniff"
+  // if it's not 'nosniff' then there is nothing to do here
   if (!contentTypeOptionsHeader.EqualsIgnoreCase("nosniff")) {
     // since we are getting here, the XCTO header was sent;
     // a non matching value most likely means a mistake happenend;
@@ -2531,7 +2518,7 @@ nsresult HttpBaseChannel::AddSecurityMessage(
 
   nsCOMPtr<nsIScriptError> error(do_CreateInstance(NS_SCRIPTERROR_CONTRACTID));
   error->InitWithSourceURI(
-      errorText, mURI, EmptyString(), 0, 0, nsIScriptError::warningFlag,
+      errorText, mURI, u""_ns, 0, 0, nsIScriptError::warningFlag,
       NS_ConvertUTF16toUTF8(aMessageCategory), innerWindowID);
 
   console->LogMessage(error);
@@ -3234,7 +3221,8 @@ HttpBaseChannel::SetNewListener(nsIStreamListener* aListener,
 //-----------------------------------------------------------------------------
 
 void HttpBaseChannel::ReleaseListeners() {
-  MOZ_ASSERT(NS_IsMainThread(), "Should only be called on the main thread.");
+  MOZ_ASSERT(mCurrentThread->IsOnCurrentThread(),
+             "Should only be called on the current thread");
 
   mListener = nullptr;
   mCallbacks = nullptr;
@@ -3485,7 +3473,7 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
         } else {
           nsAutoCString ctype;
           if (NS_FAILED(mRequestHead.GetHeader(nsHttp::Content_Type, ctype))) {
-            ctype = NS_LITERAL_CSTRING("application/octet-stream");
+            ctype = "application/octet-stream"_ns;
           }
           nsAutoCString clen;
           if (NS_SUCCEEDED(
@@ -3511,8 +3499,7 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
   if (mReferrerInfo) {
     dom::ReferrerPolicy referrerPolicy = dom::ReferrerPolicy::_empty;
     nsAutoCString tRPHeaderCValue;
-    Unused << GetResponseHeader(NS_LITERAL_CSTRING("referrer-policy"),
-                                tRPHeaderCValue);
+    Unused << GetResponseHeader("referrer-policy"_ns, tRPHeaderCValue);
     NS_ConvertUTF8toUTF16 tRPHeaderValue(tRPHeaderCValue);
 
     if (!tRPHeaderValue.IsEmpty()) {
@@ -3545,8 +3532,7 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
     nsAutoCString oldAcceptValue;
     nsresult hasHeader = mRequestHead.GetHeader(nsHttp::Accept, oldAcceptValue);
     if (NS_SUCCEEDED(hasHeader)) {
-      rv = httpChannel->SetRequestHeader(NS_LITERAL_CSTRING("Accept"),
-                                         oldAcceptValue, false);
+      rv = httpChannel->SetRequestHeader("Accept"_ns, oldAcceptValue, false);
       MOZ_ASSERT(NS_SUCCEEDED(rv));
     }
   }
@@ -3648,8 +3634,8 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
   // transfer any properties
   nsCOMPtr<nsIWritablePropertyBag> bag(do_QueryInterface(newChannel));
   if (bag) {
-    for (auto iter = mPropertyHash.Iter(); !iter.Done(); iter.Next()) {
-      bag->SetProperty(iter.Key(), iter.UserData());
+    for (const auto& entry : mPropertyHash) {
+      bag->SetProperty(entry.GetKey(), entry.GetWeak());
     }
   }
 
@@ -4284,7 +4270,9 @@ HttpBaseChannel::SetThrottleQueue(nsIInputChannelThrottleQueue* aQueue) {
 
 NS_IMETHODIMP
 HttpBaseChannel::GetThrottleQueue(nsIInputChannelThrottleQueue** aQueue) {
-  *aQueue = mThrottleQueue;
+  NS_ENSURE_ARG_POINTER(aQueue);
+  nsCOMPtr<nsIInputChannelThrottleQueue> queue = mThrottleQueue;
+  queue.forget(aQueue);
   return NS_OK;
 }
 

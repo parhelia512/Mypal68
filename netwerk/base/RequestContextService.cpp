@@ -58,7 +58,6 @@ class RequestContext final : public nsIRequestContext, public nsITimerCallback {
   uint64_t mID;
   Atomic<uint32_t> mBlockingTransactionCount;
   UniquePtr<SpdyPushCache> mSpdyCache;
-  nsCString mUserAgentOverride;
 
   typedef nsCOMPtr<nsIRequestTailUnblockCallback> PendingTailRequest;
   // Number of known opened non-tailed requets
@@ -184,15 +183,6 @@ void RequestContext::SetSpdyPushCache(SpdyPushCache* aSpdyPushCache) {
 }
 
 uint64_t RequestContext::GetID() { return mID; }
-
-const nsACString& RequestContext::GetUserAgentOverride() {
-  return mUserAgentOverride;
-}
-
-void RequestContext::SetUserAgentOverride(
-    const nsACString& aUserAgentOverride) {
-  mUserAgentOverride = aUserAgentOverride;
-}
 
 NS_IMETHODIMP
 RequestContext::AddNonTailRequest() {
@@ -509,11 +499,10 @@ RequestContextService::GetRequestContext(const uint64_t rcID,
     return NS_ERROR_ILLEGAL_DURING_SHUTDOWN;
   }
 
-  if (!mTable.Get(rcID, rc)) {
-    nsCOMPtr<nsIRequestContext> newSC = new RequestContext(rcID);
-    mTable.Put(rcID, newSC);
-    newSC.swap(*rc);
-  }
+  *rc = do_AddRef(mTable.LookupOrInsertWith(rcID, [&] {
+          nsCOMPtr<nsIRequestContext> newSC = new RequestContext(rcID);
+          return newSC;
+        })).take();
 
   return NS_OK;
 }
@@ -547,7 +536,7 @@ RequestContextService::NewRequestContext(nsIRequestContext** rc) {
       mNextRCID++;
 
   nsCOMPtr<nsIRequestContext> newSC = new RequestContext(rcID);
-  mTable.Put(rcID, newSC);
+  mTable.InsertOrUpdate(rcID, newSC);
   newSC.swap(*rc);
 
   return NS_OK;

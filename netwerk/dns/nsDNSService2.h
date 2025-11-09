@@ -11,9 +11,8 @@
 #include "nsIObserver.h"
 #include "nsHostResolver.h"
 #include "nsString.h"
-#include "nsTHashtable.h"
+#include "nsTHashSet.h"
 #include "nsHashKeys.h"
-#include "base/lock.h"
 #include "mozilla/Attributes.h"
 #include "TRRService.h"
 
@@ -57,19 +56,23 @@ class nsDNSService final : public nsPIDNSService,
                               nsIIDNService* aIDN, nsACString& aACE);
 
   nsresult AsyncResolveInternal(
-      const nsACString& aHostname, uint16_t type, uint32_t flags,
-      nsIDNSListener* aListener, nsIEventTarget* target_,
+      const nsACString& aHostname, const nsACString& aTrrServer,
+      uint16_t type, uint32_t flags, nsIDNSListener* aListener,
+      nsIEventTarget* target_,
       const mozilla::OriginAttributes& aOriginAttributes,
       nsICancelable** result);
 
   nsresult CancelAsyncResolveInternal(
-      const nsACString& aHostname, uint16_t aType, uint32_t aFlags,
-      nsIDNSListener* aListener, nsresult aReason,
+      const nsACString& aHostname, const nsACString& aTrrServer,
+      uint16_t aType, uint32_t aFlags, nsIDNSListener* aListener,
+      nsresult aReason,
       const mozilla::OriginAttributes& aOriginAttributes);
 
   nsresult ResolveInternal(const nsACString& aHostname, uint32_t flags,
                            const mozilla::OriginAttributes& aOriginAttributes,
                            nsIDNSRecord** result);
+
+  bool DNSForbiddenByActiveProxy(const nsACString& aHostname);
 
   RefPtr<nsHostResolver> mResolver;
   nsCOMPtr<nsIIDNService> mIDN;
@@ -88,9 +91,9 @@ class nsDNSService final : public nsPIDNSService,
   bool mNotifyResolution;
   bool mOfflineLocalhost;
   bool mForceResolveOn;
-  uint32_t mProxyType;
-  nsTHashtable<nsCStringHashKey> mLocalDomains;
+  nsTHashSet<nsCString> mLocalDomains;
   RefPtr<mozilla::net::TRRService> mTrrService;
+  mozilla::Atomic<bool, mozilla::Relaxed> mHasSocksProxy;
 
   uint32_t mResCacheEntries;
   uint32_t mResCacheExpiration;

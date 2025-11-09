@@ -258,9 +258,8 @@ bool nsChannelClassifier::IsHostnameWhitelisted(
   }
   ToLowerCase(host);
 
-  nsCCharSeparatedTokenizer tokenizer(aWhitelisted, ',');
-  while (tokenizer.hasMoreTokens()) {
-    const nsACString& token = tokenizer.nextToken();
+  for (const nsACString& token :
+       nsCCharSeparatedTokenizer(aWhitelisted, ',').ToRange()) {
     if (token.Equals(host)) {
       LOG(("nsChannelClassifier[%p]:StartInternal skipping %s (whitelisted)",
            this, host.get()));

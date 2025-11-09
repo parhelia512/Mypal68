@@ -263,11 +263,7 @@ nsPreflightCache::CacheEntry* nsPreflightCache::GetEntry(
 
   // This is a new entry, allocate and insert into the table now so that any
   // failures don't cause items to be removed from a full cache.
-  CacheEntry* newEntry = new CacheEntry(key);
-  if (!newEntry) {
-    NS_WARNING("Failed to allocate new cache entry!");
-    return nullptr;
-  }
+  auto newEntry = MakeUnique<CacheEntry>(key);
 
   NS_ASSERTION(mTable.Count() <= PREFLIGHT_CACHE_SIZE,
                "Something is borked, too many entries in the cache!");
@@ -301,10 +297,10 @@ nsPreflightCache::CacheEntry* nsPreflightCache::GetEntry(
     }
   }
 
-  mTable.Put(key, newEntry);
-  mList.insertFront(newEntry);
+  auto* newEntryWeakRef = mTable.InsertOrUpdate(key, std::move(newEntry)).get();
+  mList.insertFront(newEntryWeakRef);
 
-  return newEntry;
+  return newEntryWeakRef;
 }
 
 void nsPreflightCache::RemoveEntries(nsIURI* aURI, nsIPrincipal* aPrincipal) {
@@ -601,19 +597,10 @@ nsCORSListenerProxy::OnStopRequest(nsIRequest* aRequest, nsresult aStatusCode) {
   nsCOMPtr<nsIStreamListener> listener;
   {
     MutexAutoLock lock(mMutex);
-    listener = mOuterListener.forget();
+    listener = std::move(mOuterListener);
   }
 
-#if defined(MOZ_FENNEC)
-  // To workaround bug 1546191 (which is likely harmless) we want to add a
-  // non-null check.  As it's just an Android/Fennec crash, we also don't want
-  // to mask other platforms from possible regressions of this code.
-  nsresult rv =
-      listener ? listener->OnStopRequest(aRequest, aStatusCode) : NS_OK;
-#else
   nsresult rv = listener->OnStopRequest(aRequest, aStatusCode);
-#endif
-
   mOuterNotificationCallbacks = nullptr;
   mHttpChannel = nullptr;
   return rv;
@@ -1152,9 +1139,8 @@ void nsCORSPreflightListener::AddResultToCache(nsIRequest* aRequest) {
   Unused << http->GetResponseHeader("Access-Control-Allow-Methods"_ns,
                                     headerVal);
 
-  nsCCharSeparatedTokenizer methods(headerVal, ',');
-  while (methods.hasMoreTokens()) {
-    const nsDependentCSubstring& method = methods.nextToken();
+  for (const nsACString& method :
+       nsCCharSeparatedTokenizer(headerVal, ',').ToRange()) {
     if (method.IsEmpty()) {
       continue;
     }
@@ -1181,9 +1167,8 @@ void nsCORSPreflightListener::AddResultToCache(nsIRequest* aRequest) {
   Unused << http->GetResponseHeader("Access-Control-Allow-Headers"_ns,
                                     headerVal);
 
-  nsCCharSeparatedTokenizer headers(headerVal, ',');
-  while (headers.hasMoreTokens()) {
-    const nsDependentCSubstring& header = headers.nextToken();
+  for (const nsACString& header :
+       nsCCharSeparatedTokenizer(headerVal, ',').ToRange()) {
     if (header.IsEmpty()) {
       continue;
     }
@@ -1296,9 +1281,8 @@ nsresult nsCORSPreflightListener::CheckPreflightRequestApproved(
   bool foundMethod = mPreflightMethod.EqualsLiteral("GET") ||
                      mPreflightMethod.EqualsLiteral("HEAD") ||
                      mPreflightMethod.EqualsLiteral("POST");
-  nsCCharSeparatedTokenizer methodTokens(headerVal, ',');
-  while (methodTokens.hasMoreTokens()) {
-    const nsDependentCSubstring& method = methodTokens.nextToken();
+  for (const nsACString& method :
+       nsCCharSeparatedTokenizer(headerVal, ',').ToRange()) {
     if (method.IsEmpty()) {
       continue;
     }
@@ -1328,10 +1312,9 @@ nsresult nsCORSPreflightListener::CheckPreflightRequestApproved(
   Unused << http->GetResponseHeader("Access-Control-Allow-Headers"_ns,
                                     headerVal);
   nsTArray<nsCString> headers;
-  nsCCharSeparatedTokenizer headerTokens(headerVal, ',');
   bool allowAllHeaders = false;
-  while (headerTokens.hasMoreTokens()) {
-    const nsDependentCSubstring& header = headerTokens.nextToken();
+  for (const nsACString& header :
+       nsCCharSeparatedTokenizer(headerVal, ',').ToRange()) {
     if (header.IsEmpty()) {
       continue;
     }

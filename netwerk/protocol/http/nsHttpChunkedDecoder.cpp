@@ -113,7 +113,7 @@ nsresult nsHttpChunkedDecoder::ParseChunkRemaining(char* buf, uint32_t count,
           mTrailers = MakeUnique<nsHttpHeaderArray>();
         }
 
-        nsHttpAtom hdr = {nullptr};
+        nsHttpAtom hdr;
         nsAutoCString headerNameOriginal;
         nsAutoCString val;
         if (NS_SUCCEEDED(

@@ -42,6 +42,11 @@ interface nsINetworkLinkService : nsISupports
    * The type of network connection.
    */
   readonly attribute unsigned long linkType;
+
+  /**
+   * Whether a VPN was detected on at least one active network interface.
+   */
+  readonly attribute boolean vpnDetected;
 };
 
 %{C++

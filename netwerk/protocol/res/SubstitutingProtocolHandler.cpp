@@ -226,15 +226,16 @@ void SubstitutingProtocolHandler::ConstructInternal() {
 nsresult SubstitutingProtocolHandler::CollectSubstitutions(
     nsTArray<SubstitutionMapping>& aMappings) {
   AutoReadLock lock(mSubstitutionsLock);
-  for (auto iter = mSubstitutions.ConstIter(); !iter.Done(); iter.Next()) {
-    SubstitutionEntry& entry = iter.Data();
+  for (const auto& substitutionEntry : mSubstitutions) {
+    const SubstitutionEntry& entry = substitutionEntry.GetData();
     nsCOMPtr<nsIURI> uri = entry.baseURI;
     SerializedURI serialized;
     if (uri) {
       nsresult rv = uri->GetSpec(serialized.spec);
       NS_ENSURE_SUCCESS(rv, rv);
     }
-    SubstitutionMapping substitution = {mScheme, nsCString(iter.Key()),
+    SubstitutionMapping substitution = {mScheme,
+                                        nsCString(substitutionEntry.GetKey()),
                                         serialized, entry.flags};
     aMappings.AppendElement(substitution);
   }
@@ -455,7 +456,7 @@ nsresult SubstitutingProtocolHandler::SetSubstitutionWithFlags(
       AutoWriteLock lock(mSubstitutionsLock);
       mSubstitutions.Remove(root);
     }
-    NotifyObservers(root, baseURI);
+
     return SendSubstitution(root, baseURI, flags);
   }
 
@@ -474,11 +475,9 @@ nsresult SubstitutingProtocolHandler::SetSubstitutionWithFlags(
 
     {
       AutoWriteLock lock(mSubstitutionsLock);
-      SubstitutionEntry& entry = mSubstitutions.GetOrInsert(root);
-      entry.baseURI = baseURI;
-      entry.flags = flags;
+      mSubstitutions.InsertOrUpdate(root, SubstitutionEntry{baseURI, flags});
     }
-    NotifyObservers(root, baseURI);
+
     return SendSubstitution(root, baseURI, flags);
   }
 
@@ -494,11 +493,9 @@ nsresult SubstitutingProtocolHandler::SetSubstitutionWithFlags(
 
   {
     AutoWriteLock lock(mSubstitutionsLock);
-    SubstitutionEntry& entry = mSubstitutions.GetOrInsert(root);
-    entry.baseURI = newBaseURI;
-    entry.flags = flags;
+    mSubstitutions.InsertOrUpdate(root, SubstitutionEntry{newBaseURI, flags});
   }
-  NotifyObservers(root, baseURI);
+
   return SendSubstitution(root, newBaseURI, flags);
 }
 
@@ -637,35 +634,6 @@ nsresult SubstitutingProtocolHandler::ResolveURI(nsIURI* uri,
             ("%s\n -> %s\n", spec.get(), PromiseFlatCString(result).get()));
   }
   return rv;
-}
-
-nsresult SubstitutingProtocolHandler::AddObserver(
-    nsISubstitutionObserver* aObserver) {
-  NS_ENSURE_ARG(aObserver);
-  if (mObservers.Contains(aObserver)) {
-    return NS_ERROR_DUPLICATE_HANDLE;
-  }
-
-  mObservers.AppendElement(aObserver);
-  return NS_OK;
-}
-
-nsresult SubstitutingProtocolHandler::RemoveObserver(
-    nsISubstitutionObserver* aObserver) {
-  NS_ENSURE_ARG(aObserver);
-  if (!mObservers.Contains(aObserver)) {
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  mObservers.RemoveElement(aObserver);
-  return NS_OK;
-}
-
-void SubstitutingProtocolHandler::NotifyObservers(const nsACString& aRoot,
-                                                  nsIURI* aBaseURI) {
-  for (size_t i = 0; i < mObservers.Length(); ++i) {
-    mObservers[i]->OnSetSubstitution(aRoot, aBaseURI);
-  }
 }
 
 }  // namespace net

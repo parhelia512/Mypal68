@@ -94,7 +94,7 @@ ProcessChooser.prototype = {
   },
 
   // nsISupports
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver]),
+  QueryInterface: ChromeUtils.generateQI(["nsIObserver"]),
 };
 
 add_task(async function() {
@@ -185,8 +185,8 @@ add_task(async function() {
         info("onDataAvailable");
       },
       QueryInterface: ChromeUtils.generateQI([
-        Ci.nsIStreamListener,
-        Ci.nsIRequestObserver,
+        "nsIStreamListener",
+        "nsIRequestObserver",
       ]),
     };
 
@@ -212,8 +212,8 @@ add_task(async function() {
       lockFactory: function() {},
       // nsISupports
       QueryInterface: ChromeUtils.generateQI([
-        Ci.nsIChildProcessChannelListener,
-        Ci.nsIFactory,
+        "nsIChildProcessChannelListener",
+        "nsIFactory",
       ]),
       classID: Components.ID("{a6c142a9-eb38-4a09-a940-b71cdad479e1}"),
     };

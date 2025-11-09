@@ -35,7 +35,7 @@ registerCleanupFunction(() => {
 function observerPromise(topic) {
   return new Promise(resolve => {
     let observer = {
-      QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver]),
+      QueryInterface: ChromeUtils.generateQI(["nsIObserver"]),
       observe: function(aSubject, aTopic, aData) {
         if (aTopic == topic) {
           Services.obs.removeObserver(observer, topic);

@@ -4,8 +4,8 @@
 
 #include "nsIndexedToHTML.h"
 
-#include "DateTimeFormat.h"
 #include "mozilla/Encoding.h"
+#include "mozilla/intl/AppDateTimeFormat.h"
 #include "mozilla/intl/LocaleService.h"
 #include "nsNetUtil.h"
 #include "netCore.h"
@@ -45,8 +45,6 @@ static void AppendNonAsciiToNCR(const nsAString& in, nsCString& out) {
     }
   }
 }
-
-nsIndexedToHTML::nsIndexedToHTML() : mExpectAbsLoc(false) {}
 
 nsresult nsIndexedToHTML::Create(nsISupports* aOuter, REFNSIID aIID,
                                  void** aResult) {
@@ -92,7 +90,7 @@ nsIndexedToHTML::AsyncConvertData(const char* aFromType, const char* aToType,
 NS_IMETHODIMP
 nsIndexedToHTML::OnStartRequest(nsIRequest* request) {
   nsCString buffer;
-  nsresult rv = DoOnStartRequest(request, nullptr, buffer);
+  nsresult rv = DoOnStartRequest(request, buffer);
   if (NS_FAILED(rv)) {
     request->Cancel(rv);
   }
@@ -107,12 +105,11 @@ nsIndexedToHTML::OnStartRequest(nsIRequest* request) {
 
   // Push our buffer to the listener.
 
-  rv = SendToListener(request, nullptr, buffer);
+  rv = SendToListener(request, buffer);
   return rv;
 }
 
 nsresult nsIndexedToHTML::DoOnStartRequest(nsIRequest* request,
-                                           nsISupports* aContext,
                                            nsCString& aBuffer) {
   nsresult rv;
 
@@ -144,10 +141,7 @@ nsresult nsIndexedToHTML::DoOnStartRequest(nsIRequest* request,
   if (NS_FAILED(rv)) return rv;
 
   nsCOMPtr<nsIURI> titleURL;
-  rv = NS_MutateURI(uri)
-           .SetQuery(EmptyCString())
-           .SetRef(EmptyCString())
-           .Finalize(titleURL);
+  rv = NS_MutateURI(uri).SetQuery(""_ns).SetRef(""_ns).Finalize(titleURL);
   if (NS_FAILED(rv)) {
     titleURL = uri;
   }
@@ -175,8 +169,7 @@ nsresult nsIndexedToHTML::DoOnStartRequest(nsIRequest* request,
     if (NS_FAILED(rv)) return rv;
     if (!pw.IsEmpty()) {
       nsCOMPtr<nsIURI> newUri;
-      rv =
-          NS_MutateURI(titleURL).SetPassword(EmptyCString()).Finalize(titleURL);
+      rv = NS_MutateURI(titleURL).SetPassword(""_ns).Finalize(titleURL);
       if (NS_FAILED(rv)) return rv;
     }
 
@@ -615,7 +608,7 @@ nsIndexedToHTML::OnStopRequest(nsIRequest* request, nsresult aStatus) {
     nsCString buffer;
     buffer.AssignLiteral("</tbody></table></body></html>\n");
 
-    aStatus = SendToListener(request, nullptr, buffer);
+    aStatus = SendToListener(request, buffer);
   }
 
   mParser->OnStopRequest(request, aStatus);
@@ -625,7 +618,6 @@ nsIndexedToHTML::OnStopRequest(nsIRequest* request, nsresult aStatus) {
 }
 
 nsresult nsIndexedToHTML::SendToListener(nsIRequest* aRequest,
-                                         nsISupports* aContext,
                                          const nsACString& aBuffer) {
   nsCOMPtr<nsIInputStream> inputData;
   nsresult rv = NS_NewCStringInputStream(getter_AddRefs(inputData), aBuffer);
@@ -639,27 +631,26 @@ nsIndexedToHTML::OnDataAvailable(nsIRequest* aRequest, nsIInputStream* aInput,
   return mParser->OnDataAvailable(aRequest, aInput, aOffset, aCount);
 }
 
-static nsresult FormatTime(const nsDateFormatSelector aDateFormatSelector,
-                           const nsTimeFormatSelector aTimeFormatSelector,
-                           const PRTime aPrTime, nsAString& aStringOut) {
+static nsresult FormatTime(
+    const mozilla::intl::DateTimeFormat::StyleBag& aStyleBag,
+    const PRTime aPrTime, nsAString& aStringOut) {
   // FormatPRExplodedTime will use GMT based formatted string (e.g. GMT+1)
   // instead of local time zone name (e.g. CEST).
   // To avoid this case when ResistFingerprinting is disabled, use
   // |FormatPRTime| to show exact time zone name.
   if (!nsContentUtils::ShouldResistFingerprinting()) {
-    return mozilla::DateTimeFormat::FormatPRTime(
-        aDateFormatSelector, aTimeFormatSelector, aPrTime, aStringOut);
+    return mozilla::intl::AppDateTimeFormat::Format(aStyleBag, aPrTime,
+                                                    aStringOut);
   }
 
   PRExplodedTime prExplodedTime;
   PR_ExplodeTime(aPrTime, PR_GMTParameters, &prExplodedTime);
-  return mozilla::DateTimeFormat::FormatPRExplodedTime(
-      aDateFormatSelector, aTimeFormatSelector, &prExplodedTime, aStringOut);
+  return mozilla::intl::AppDateTimeFormat::Format(aStyleBag, &prExplodedTime,
+                                                  aStringOut);
 }
 
 NS_IMETHODIMP
-nsIndexedToHTML::OnIndexAvailable(nsIRequest* aRequest, nsISupports* aCtxt,
-                                  nsIDirIndex* aIndex) {
+nsIndexedToHTML::OnIndexAvailable(nsIRequest* aRequest, nsIDirIndex* aIndex) {
   nsresult rv;
   if (!aIndex) return NS_ERROR_NULL_POINTER;
 
@@ -677,8 +668,9 @@ nsIndexedToHTML::OnIndexAvailable(nsIRequest* aRequest, nsISupports* aCtxt,
   if (loc.IsEmpty()) {
     return NS_ERROR_ILLEGAL_VALUE;
   }
-  if (loc.First() == char16_t('.'))
+  if (loc.First() == char16_t('.')) {
     pushBuffer.AppendLiteral(" class=\"hidden-object\"");
+  }
 
   pushBuffer.AppendLiteral(">\n <td sortable-data=\"");
 
@@ -802,23 +794,28 @@ nsIndexedToHTML::OnIndexAvailable(nsIRequest* aRequest, nsISupports* aCtxt,
     pushBuffer.AppendLiteral(" sortable-data=\"");
     pushBuffer.AppendInt(static_cast<int64_t>(t));
     pushBuffer.AppendLiteral("\">");
+    // Add date string
     nsAutoString formatted;
-    FormatTime(kDateFormatShort, kTimeFormatNone, t, formatted);
+    mozilla::intl::DateTimeFormat::StyleBag dateBag;
+    dateBag.date = Some(mozilla::intl::DateTimeFormat::Style::Short);
+    FormatTime(dateBag, t, formatted);
     AppendNonAsciiToNCR(formatted, pushBuffer);
     pushBuffer.AppendLiteral("</td>\n <td>");
-    FormatTime(kDateFormatNone, kTimeFormatLong, t, formatted);
+    // Add time string
+    mozilla::intl::DateTimeFormat::StyleBag timeBag;
+    timeBag.time = Some(mozilla::intl::DateTimeFormat::Style::Long);
+    FormatTime(timeBag, t, formatted);
     // use NCR to show date in any doc charset
     AppendNonAsciiToNCR(formatted, pushBuffer);
   }
 
   pushBuffer.AppendLiteral("</td>\n</tr>");
 
-  return SendToListener(aRequest, aCtxt, pushBuffer);
+  return SendToListener(aRequest, pushBuffer);
 }
 
 NS_IMETHODIMP
 nsIndexedToHTML::OnInformationAvailable(nsIRequest* aRequest,
-                                        nsISupports* aCtxt,
                                         const nsAString& aInfo) {
   nsAutoCString pushBuffer;
   nsAutoCString escapedUtf8;
@@ -830,7 +827,7 @@ nsIndexedToHTML::OnInformationAvailable(nsIRequest* aRequest,
   pushBuffer.AppendLiteral(
       "</td>\n <td></td>\n <td></td>\n <td></td>\n</tr>\n");
 
-  return SendToListener(aRequest, aCtxt, pushBuffer);
+  return SendToListener(aRequest, pushBuffer);
 }
 
 void nsIndexedToHTML::FormatSizeString(int64_t inSize,

@@ -46,7 +46,13 @@ EXPORTS.mozilla.net += [
     'HttpBaseChannel.h',
     'HttpChannelChild.h',
     'HttpChannelParent.h',
+    'HttpConnectionMgrChild.h',
+    'HttpConnectionMgrParent.h',
+    'HttpConnectionMgrShell.h',
     'HttpInfo.h',
+    'HttpTransactionChild.h',
+    'HttpTransactionParent.h',
+    'HttpTransactionShell.h',
     'nsServerTiming.h',
     'NullHttpChannel.h',
     'PHttpChannelParams.h',
@@ -81,7 +87,11 @@ UNIFIED_SOURCES += [
     'HttpChannelChild.cpp',
     'HttpChannelParent.cpp',
     'HttpChannelParentListener.cpp',
+    'HttpConnectionMgrChild.cpp',
+    'HttpConnectionMgrParent.cpp',
     'HttpInfo.cpp',
+    'HttpTransactionChild.cpp',
+    'HttpTransactionParent.cpp',
     'InterceptedChannel.cpp',
     'InterceptedHttpChannel.cpp',
     'nsCORSListenerProxy.cpp',
@@ -104,6 +114,7 @@ UNIFIED_SOURCES += [
     'nsServerTiming.cpp',
     'NullHttpChannel.cpp',
     'NullHttpTransaction.cpp',
+    'TRRServiceChannel.cpp',
     'TunnelUtils.cpp',
 ]
 
@@ -118,11 +129,8 @@ IPDL_SOURCES += [
     'PClassifierDummyChannel.ipdl',
     'PHttpBackgroundChannel.ipdl',
     'PHttpChannel.ipdl',
-]
-
-EXTRA_JS_MODULES += [
-    'UserAgentOverrides.jsm',
-    'UserAgentUpdates.jsm',
+    'PHttpConnectionMgr.ipdl',
+    'PHttpTransaction.ipdl',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')
@@ -134,11 +142,11 @@ LOCAL_INCLUDES += [
     '/extensions/auth',
     '/netwerk/base',
     '/netwerk/cookie',
+    '/netwerk/dns',
     '/netwerk/url-classifier',
 ]
 
 EXTRA_JS_MODULES += [
-    'UAOverridesBootstrapper.jsm',
     'WellKnownOpportunisticUtils.jsm',
 ]
 

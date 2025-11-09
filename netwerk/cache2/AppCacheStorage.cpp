@@ -19,8 +19,7 @@
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
 
-namespace mozilla {
-namespace net {
+namespace mozilla::net {
 
 AppCacheStorage::AppCacheStorage(nsILoadContextInfo* aInfo,
                                  nsIApplicationCache* aAppCache)
@@ -35,7 +34,9 @@ AppCacheStorage::~AppCacheStorage() {
 NS_IMETHODIMP AppCacheStorage::AsyncOpenURI(
     nsIURI* aURI, const nsACString& aIdExtension, uint32_t aFlags,
     nsICacheEntryOpenCallback* aCallback) {
-  if (!CacheStorageService::Self()) return NS_ERROR_NOT_INITIALIZED;
+  if (!CacheStorageService::Self()) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
 
   NS_ENSURE_ARG(aURI);
   NS_ENSURE_ARG(aCallback);
@@ -71,7 +72,7 @@ NS_IMETHODIMP AppCacheStorage::AsyncOpenURI(
   // there is just a single session for an appcache version (identified
   // by the client id).
   if (LoadInfo()->IsAnonymous()) {
-    cacheKey = NS_LITERAL_CSTRING("anon&") + cacheKey;
+    cacheKey = "anon&"_ns + cacheKey;
   }
 
   nsAutoCString scheme;
@@ -107,6 +108,9 @@ NS_IMETHODIMP AppCacheStorage::AsyncDoomURI(
   if (!mAppCache) {
     return NS_ERROR_NOT_AVAILABLE;
   }
+  if (!LoadInfo()) {
+    return NS_ERROR_CACHE_KEY_NOT_FOUND;
+  }
 
   RefPtr<_OldStorage> old = new _OldStorage(LoadInfo(), WriteToDisk(),
                                             LookupAppCache(), true, mAppCache);
@@ -115,7 +119,12 @@ NS_IMETHODIMP AppCacheStorage::AsyncDoomURI(
 
 NS_IMETHODIMP AppCacheStorage::AsyncEvictStorage(
     nsICacheEntryDoomCallback* aCallback) {
-  if (!CacheStorageService::Self()) return NS_ERROR_NOT_INITIALIZED;
+  if (!CacheStorageService::Self()) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+  if (!LoadInfo()) {
+    return NS_ERROR_CACHE_KEY_NOT_FOUND;
+  }
 
   nsresult rv;
 
@@ -144,7 +153,12 @@ NS_IMETHODIMP AppCacheStorage::AsyncEvictStorage(
 
 NS_IMETHODIMP AppCacheStorage::AsyncVisitStorage(
     nsICacheStorageVisitor* aVisitor, bool aVisitEntries) {
-  if (!CacheStorageService::Self()) return NS_ERROR_NOT_INITIALIZED;
+  if (!CacheStorageService::Self()) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+  if (!LoadInfo()) {
+    return NS_ERROR_CACHE_KEY_NOT_FOUND;
+  }
 
   LOG(("AppCacheStorage::AsyncVisitStorage [this=%p, cb=%p]", this, aVisitor));
 
@@ -168,5 +182,4 @@ NS_IMETHODIMP AppCacheStorage::GetCacheIndexEntryAttrs(
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-}  // namespace net
-}  // namespace mozilla
+}  // namespace mozilla::net

@@ -36,6 +36,7 @@
 #include "mozilla/net/ChildDNSService.h"
 #include "mozilla/net/DNSListenerProxy.h"
 #include "mozilla/Services.h"
+#include "mozilla/StaticPrefs_network.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TextUtils.h"
 #include "mozilla/Utf8.h"
@@ -55,7 +56,7 @@ static const char kPrefDnsLocalDomains[] = "network.dns.localDomains";
 static const char kPrefDnsForceResolve[] = "network.dns.forceResolve";
 static const char kPrefDnsOfflineLocalhost[] = "network.dns.offline-localhost";
 static const char kPrefDnsNotifyResolution[] = "network.dns.notifyResolution";
-static const char kPrefNetworkProxyType[] = "network.proxy.type";
+static const char kPrefNetworkProxySOCKS[] = "network.proxy.socks";
 
 //-----------------------------------------------------------------------------
 
@@ -115,6 +116,29 @@ nsDNSRecord::IsTRR(bool* retval) {
   }
   return NS_OK;
 }
+
+NS_IMETHODIMP
+nsDNSRecord::GetTrrFetchDuration(double* aTime) {
+  AutoLock lock(mHostRecord->addr_info_lock);
+  if (mHostRecord->addr_info && mHostRecord->addr_info->IsTRR()) {
+    *aTime = mHostRecord->addr_info->GetTrrFetchDuration();
+  } else {
+    *aTime = 0;
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDNSRecord::GetTrrFetchDurationNetworkOnly(double* aTime) {
+  AutoLock lock(mHostRecord->addr_info_lock);
+  if (mHostRecord->addr_info && mHostRecord->addr_info->IsTRR()) {
+    *aTime = mHostRecord->addr_info->GetTrrFetchDurationNetworkOnly();
+  } else {
+    *aTime = 0;
+  }
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 nsDNSRecord::GetNextAddr(uint16_t port, NetAddr* addr) {
   if (mDone) {
@@ -293,10 +317,15 @@ nsDNSRecord::ReportUnusable(uint16_t aPort) {
   return NS_OK;
 }
 
-class nsDNSByTypeRecord : public nsIDNSByTypeRecord {
+class nsDNSByTypeRecord : public nsIDNSByTypeRecord,
+                          public nsIDNSTXTRecord,
+                          public nsIDNSHTTPSSVCRecord {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
+  NS_FORWARD_SAFE_NSIDNSRECORD(((nsIDNSRecord*)nullptr))
   NS_DECL_NSIDNSBYTYPERECORD
+  NS_DECL_NSIDNSTXTRECORD
+  NS_DECL_NSIDNSHTTPSSVCRECORD
 
   explicit nsDNSByTypeRecord(nsHostRecord* hostRecord) {
     mHostRecord = do_QueryObject(hostRecord);
@@ -307,19 +336,35 @@ class nsDNSByTypeRecord : public nsIDNSByTypeRecord {
   RefPtr<TypeHostRecord> mHostRecord;
 };
 
-NS_IMPL_ISUPPORTS(nsDNSByTypeRecord, nsIDNSByTypeRecord)
+NS_IMPL_ISUPPORTS(nsDNSByTypeRecord, nsIDNSRecord, nsIDNSByTypeRecord,
+                  nsIDNSTXTRecord, nsIDNSHTTPSSVCRecord)
+
+NS_IMETHODIMP
+nsDNSByTypeRecord::GetType(uint32_t* aType) {
+  *aType = mHostRecord->GetType();
+  return NS_OK;
+}
 
 NS_IMETHODIMP
 nsDNSByTypeRecord::GetRecords(nsTArray<nsCString>& aRecords) {
   // deep copy
-  mHostRecord->GetRecords(aRecords);
-  return NS_OK;
+  return mHostRecord->GetRecords(aRecords);
 }
 
 NS_IMETHODIMP
 nsDNSByTypeRecord::GetRecordsAsOneString(nsACString& aRecords) {
   // deep copy
-  mHostRecord->GetRecordsAsOneString(aRecords);
+  return mHostRecord->GetRecordsAsOneString(aRecords);
+}
+
+NS_IMETHODIMP
+nsDNSByTypeRecord::GetRecords(nsTArray<RefPtr<nsISVCBRecord>>& aRecords) {
+  return mHostRecord->GetRecords(aRecords);
+}
+
+NS_IMETHODIMP
+nsDNSByTypeRecord::GetResults(mozilla::net::TypeRecordResultType* aResults) {
+  *aResults = mHostRecord->GetResults();
   return NS_OK;
 }
 
@@ -331,11 +376,13 @@ class nsDNSAsyncRequest final : public nsResolveHostCallback,
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSICANCELABLE
 
-  nsDNSAsyncRequest(nsHostResolver* res, const nsACString& host, uint16_t type,
+  nsDNSAsyncRequest(nsHostResolver* res, const nsACString& host,
+                    const nsACString& trrServer, uint16_t type,
                     const OriginAttributes& attrs, nsIDNSListener* listener,
                     uint16_t flags, uint16_t af)
       : mResolver(res),
         mHost(host),
+        mTrrServer(trrServer),
         mType(type),
         mOriginAttributes(attrs),
         mListener(listener),
@@ -352,6 +399,7 @@ class nsDNSAsyncRequest final : public nsResolveHostCallback,
 
   RefPtr<nsHostResolver> mResolver;
   nsCString mHost;  // hostname we're resolving
+  nsCString mTrrServer; // A trr server to be used.
   uint16_t mType;
   const OriginAttributes
       mOriginAttributes;  // The originAttributes for this resolving
@@ -368,36 +416,32 @@ NS_IMPL_ISUPPORTS(nsDNSAsyncRequest, nsICancelable)
 void nsDNSAsyncRequest::OnResolveHostComplete(nsHostResolver* resolver,
                                               nsHostRecord* hostRecord,
                                               nsresult status) {
-  if (hostRecord->type != nsDNSService::RESOLVE_TYPE_DEFAULT) {
-    nsCOMPtr<nsIDNSByTypeRecord> rec;
-    if (NS_SUCCEEDED(status)) {
-      MOZ_ASSERT(hostRecord, "no host record");
+  // need to have an owning ref when we issue the callback to enable
+  // the caller to be able to addref/release multiple times without
+  // destroying the record prematurely.
+  nsCOMPtr<nsIDNSRecord> rec;
+  if (NS_SUCCEEDED(status)) {
+    MOZ_ASSERT(hostRecord, "no host record");
+    if (hostRecord->type != nsDNSService::RESOLVE_TYPE_DEFAULT) {
       rec = new nsDNSByTypeRecord(hostRecord);
-    }
-    mListener->OnLookupByTypeComplete(this, rec, status);
-  } else {
-    // need to have an owning ref when we issue the callback to enable
-    // the caller to be able to addref/release multiple times without
-    // destroying the record prematurely.
-    nsCOMPtr<nsIDNSRecord> rec;
-    if (NS_SUCCEEDED(status)) {
-      NS_ASSERTION(hostRecord, "no host record");
+    } else {
       rec = new nsDNSRecord(hostRecord);
     }
-
-    mListener->OnLookupComplete(this, rec, status);
   }
+
+  mListener->OnLookupComplete(this, rec, status);
   mListener = nullptr;
 }
 
 bool nsDNSAsyncRequest::EqualsAsyncListener(nsIDNSListener* aListener) {
-  nsCOMPtr<nsIDNSListenerProxy> wrapper = do_QueryInterface(mListener);
+  uintptr_t originalListenerAddr = reinterpret_cast<uintptr_t>(mListener.get());
+  RefPtr<DNSListenerProxy> wrapper = do_QueryObject(mListener);
   if (wrapper) {
-    nsCOMPtr<nsIDNSListener> originalListener;
-    wrapper->GetOriginalListener(getter_AddRefs(originalListener));
-    return aListener == originalListener;
+    originalListenerAddr = wrapper->GetOriginalListenerAddress();
   }
-  return (aListener == mListener);
+
+  uintptr_t listenerAddr = reinterpret_cast<uintptr_t>(aListener);
+  return (listenerAddr == originalListenerAddr);
 }
 
 size_t nsDNSAsyncRequest::SizeOfIncludingThis(MallocSizeOf mallocSizeOf) const {
@@ -414,8 +458,8 @@ size_t nsDNSAsyncRequest::SizeOfIncludingThis(MallocSizeOf mallocSizeOf) const {
 NS_IMETHODIMP
 nsDNSAsyncRequest::Cancel(nsresult reason) {
   NS_ENSURE_ARG(NS_FAILED(reason));
-  mResolver->DetachCallback(mHost, mType, mOriginAttributes, mFlags, mAF, this,
-                            reason);
+  mResolver->DetachCallback(mHost, mTrrServer, mType, mOriginAttributes, mFlags,
+                            mAF, this, reason);
   return NS_OK;
 }
 
@@ -502,8 +546,8 @@ nsDNSService::nsDNSService()
       mNotifyResolution(false),
       mOfflineLocalhost(false),
       mForceResolveOn(false),
-      mProxyType(0),
       mTrrService(nullptr),
+      mHasSocksProxy(false),
       mResCacheEntries(0),
       mResCacheExpiration(0),
       mResCacheGrace(0),
@@ -606,9 +650,11 @@ nsresult nsDNSService::ReadPrefs(const char* name) {
       mNotifyResolution = tmpbool;
     }
   }
-  if (!name || !strcmp(name, kPrefNetworkProxyType)) {
-    if (NS_SUCCEEDED(Preferences::GetUint(kPrefNetworkProxyType, &tmpint))) {
-      mProxyType = tmpint;
+  if (!name || !strcmp(name, kPrefNetworkProxySOCKS)) {
+    if (NS_SUCCEEDED(Preferences::GetUint(kPrefNetworkProxySOCKS, &tmpint))) {
+      nsAutoCString socks;
+      Preferences::GetCString(kPrefNetworkProxySOCKS, socks);
+      mHasSocksProxy = !socks.IsEmpty();
     }
   }
   if (!name || !strcmp(name, kPrefIPv4OnlyDomains)) {
@@ -619,12 +665,12 @@ nsresult nsDNSService::ReadPrefs(const char* name) {
     Preferences::GetCString(kPrefDnsLocalDomains, localDomains);
     AutoLock lock(mLock);
     mLocalDomains.Clear();
-    if (!localDomains.IsEmpty()) {
-      nsCCharSeparatedTokenizer tokenizer(
-          localDomains, ',', nsCCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
-      while (tokenizer.hasMoreTokens()) {
-        mLocalDomains.PutEntry(tokenizer.nextToken());
-      }
+    for (const auto& token :
+         nsCCharSeparatedTokenizerTemplate<NS_IsAsciiWhitespace,
+                                           nsTokenizerFlags::SeparatorOptional>(
+             localDomains, ',')
+             .ToRange()) {
+      mLocalDomains.Insert(token);
     }
   }
   if (!name || !strcmp(name, kPrefDnsForceResolve)) {
@@ -632,7 +678,8 @@ nsresult nsDNSService::ReadPrefs(const char* name) {
     mForceResolveOn = !mForceResolve.IsEmpty();
   }
 
-  if (mProxyType == nsIProtocolProxyService::PROXYCONFIG_MANUAL) {
+  if (StaticPrefs::network_proxy_type() ==
+      nsIProtocolProxyService::PROXYCONFIG_MANUAL) {
     // Disable prefetching either by explicit preference or if a
     // manual proxy is configured
     mDisablePrefetch = true;
@@ -680,8 +727,7 @@ nsDNSService::Init() {
     prefs->AddObserver(kPrefDnsNotifyResolution, this, false);
 
     // Monitor these to see if there is a change in proxy configuration
-    // If a manual proxy is in use, disable prefetch implicitly
-    prefs->AddObserver("network.proxy.type", this, false);
+    prefs->AddObserver(kPrefNetworkProxySOCKS, this, false);
   }
 
   nsDNSPrefetch::Initialize(this);
@@ -747,12 +793,27 @@ nsDNSService::SetPrefetchEnabled(bool inVal) {
   return NS_OK;
 }
 
+bool nsDNSService::DNSForbiddenByActiveProxy(const nsACString& aHostname) {
+  // We should avoid doing DNS when a proxy is in use.
+  PRNetAddr tempAddr;
+  if (StaticPrefs::network_proxy_type() ==
+          nsIProtocolProxyService::PROXYCONFIG_MANUAL &&
+      mHasSocksProxy && StaticPrefs::network_proxy_socks_remote_dns()) {
+    // Allow IP lookups through, but nothing else.
+    if (PR_StringToNetAddr(nsCString(aHostname).get(), &tempAddr) !=
+        PR_SUCCESS) {
+      return true;
+    }
+  }
+  return false;
+}
+
 nsresult nsDNSService::PreprocessHostname(bool aLocalDomain,
                                           const nsACString& aInput,
                                           nsIIDNService* aIDN,
                                           nsACString& aACE) {
   // Enforce RFC 7686
-  if (mBlockDotOnion && StringEndsWith(aInput, NS_LITERAL_CSTRING(".onion"))) {
+  if (mBlockDotOnion && StringEndsWith(aInput, ".onion"_ns)) {
     return NS_ERROR_UNKNOWN_HOST;
   }
 
@@ -786,8 +847,8 @@ nsresult nsDNSService::PreprocessHostname(bool aLocalDomain,
 }
 
 nsresult nsDNSService::AsyncResolveInternal(
-    const nsACString& aHostname, uint16_t type, uint32_t flags,
-    nsIDNSListener* aListener, nsIEventTarget* target_,
+    const nsACString& aHostname, const nsACString& aTrrServer, uint16_t type,
+    uint32_t flags, nsIDNSListener* aListener, nsIEventTarget* target_,
     const OriginAttributes& aOriginAttributes, nsICancelable** result) {
   // grab reference to global host resolver and IDN service.  beware
   // simultaneous shutdown!!
@@ -804,7 +865,7 @@ nsresult nsDNSService::AsyncResolveInternal(
 
     res = mResolver;
     idn = mIDN;
-    localDomain = mLocalDomains.GetEntry(aHostname);
+    localDomain = mLocalDomains.Contains(aHostname);
   }
 
   if (mNotifyResolution) {
@@ -813,8 +874,16 @@ nsresult nsDNSService::AsyncResolveInternal(
 
   if (!res) return NS_ERROR_OFFLINE;
 
-  if ((type != RESOLVE_TYPE_DEFAULT) && (type != RESOLVE_TYPE_TXT)) {
+  if ((type != RESOLVE_TYPE_DEFAULT) && (type != RESOLVE_TYPE_TXT) &&
+      (type != RESOLVE_TYPE_HTTPSSVC)) {
     return NS_ERROR_INVALID_ARG;
+  }
+
+  if (DNSForbiddenByActiveProxy(aHostname)) {
+    // nsHostResolver returns NS_ERROR_UNKNOWN_HOST for lots of reasons.
+    // We use a different error code to differentiate this failure and to make
+    // it clear(er) where this error comes from.
+    return NS_ERROR_UNKNOWN_PROXY_HOST;
   }
 
   nsCString hostname;
@@ -843,18 +912,18 @@ nsresult nsDNSService::AsyncResolveInternal(
 
   MOZ_ASSERT(listener);
   RefPtr<nsDNSAsyncRequest> req = new nsDNSAsyncRequest(
-      res, hostname, type, aOriginAttributes, listener, flags, af);
+      res, hostname, aTrrServer, type, aOriginAttributes, listener, flags, af);
   if (!req) return NS_ERROR_OUT_OF_MEMORY;
 
-  rv = res->ResolveHost(req->mHost, type, req->mOriginAttributes, flags, af,
-                        req);
+  rv = res->ResolveHost(req->mHost, req->mTrrServer, type, req->mOriginAttributes,
+                        flags, af, req);
   req.forget(result);
   return rv;
 }
 
 nsresult nsDNSService::CancelAsyncResolveInternal(
-    const nsACString& aHostname, uint16_t aType, uint32_t aFlags,
-    nsIDNSListener* aListener, nsresult aReason,
+    const nsACString& aHostname, const nsACString& aTrrServer, uint16_t aType,
+    uint32_t aFlags, nsIDNSListener* aListener, nsresult aReason,
     const OriginAttributes& aOriginAttributes) {
   // grab reference to global host resolver and IDN service.  beware
   // simultaneous shutdown!!
@@ -869,7 +938,7 @@ nsresult nsDNSService::CancelAsyncResolveInternal(
 
     res = mResolver;
     idn = mIDN;
-    localDomain = mLocalDomains.GetEntry(aHostname);
+    localDomain = mLocalDomains.Contains(aHostname);
   }
   if (!res) return NS_ERROR_OFFLINE;
 
@@ -882,8 +951,8 @@ nsresult nsDNSService::CancelAsyncResolveInternal(
   uint16_t af =
       (aType != RESOLVE_TYPE_DEFAULT) ? 0 : GetAFForLookup(hostname, aFlags);
 
-  res->CancelAsyncRequest(hostname, aType, aOriginAttributes, aFlags, af,
-                          aListener, aReason);
+  res->CancelAsyncRequest(hostname, aTrrServer, aType, aOriginAttributes, aFlags,
+                          af, aListener, aReason);
   return NS_OK;
 }
 
@@ -900,8 +969,8 @@ nsDNSService::AsyncResolve(const nsACString& aHostname, uint32_t flags,
     }
   }
 
-  return AsyncResolveInternal(aHostname, RESOLVE_TYPE_DEFAULT, flags, listener,
-                              target_, attrs, result);
+  return AsyncResolveInternal(aHostname, EmptyCString(), RESOLVE_TYPE_DEFAULT, flags,
+                              listener, target_, attrs, result);
 }
 
 NS_IMETHODIMP
@@ -910,8 +979,34 @@ nsDNSService::AsyncResolveNative(const nsACString& aHostname, uint32_t flags,
                                  nsIEventTarget* target_,
                                  const OriginAttributes& aOriginAttributes,
                                  nsICancelable** result) {
-  return AsyncResolveInternal(aHostname, RESOLVE_TYPE_DEFAULT, flags, aListener,
-                              target_, aOriginAttributes, result);
+  return AsyncResolveInternal(aHostname, EmptyCString(), RESOLVE_TYPE_DEFAULT, flags,
+                              aListener, target_, aOriginAttributes, result);
+}
+
+NS_IMETHODIMP
+nsDNSService::AsyncResolveWithTrrServer(const nsACString& aHostname,
+    const nsACString& aTrrServer, uint32_t flags, nsIDNSListener* listener,
+    nsIEventTarget* target_, JS::HandleValue aOriginAttributes, JSContext* aCx,
+    uint8_t aArgc, nsICancelable** result) {
+  OriginAttributes attrs;
+
+  if (aArgc == 1) {
+    if (!aOriginAttributes.isObject() || !attrs.Init(aCx, aOriginAttributes)) {
+      return NS_ERROR_INVALID_ARG;
+    }
+  }
+
+  return AsyncResolveInternal(aHostname, aTrrServer, RESOLVE_TYPE_DEFAULT, flags,
+                              listener, target_, attrs, result);
+}
+
+NS_IMETHODIMP
+nsDNSService::AsyncResolveWithTrrServerNative(
+    const nsACString& aHostname, const nsACString& aTrrServer, uint32_t flags,
+    nsIDNSListener* aListener, nsIEventTarget* target_,
+    const OriginAttributes& aOriginAttributes, nsICancelable** result) {
+  return AsyncResolveInternal(aHostname, aTrrServer, RESOLVE_TYPE_DEFAULT, flags,
+                              aListener, target_, aOriginAttributes, result);
 }
 
 NS_IMETHODIMP
@@ -929,8 +1024,8 @@ nsDNSService::AsyncResolveByType(const nsACString& aHostname, uint16_t aType,
     }
   }
 
-  return AsyncResolveInternal(aHostname, aType, aFlags, aListener, aTarget_,
-                              attrs, aResult);
+  return AsyncResolveInternal(aHostname, EmptyCString(), aType, aFlags, aListener,
+                              aTarget_, attrs, aResult);
 }
 
 NS_IMETHODIMP
@@ -938,8 +1033,8 @@ nsDNSService::AsyncResolveByTypeNative(
     const nsACString& aHostname, uint16_t aType, uint32_t aFlags,
     nsIDNSListener* aListener, nsIEventTarget* aTarget_,
     const OriginAttributes& aOriginAttributes, nsICancelable** aResult) {
-  return AsyncResolveInternal(aHostname, aType, aFlags, aListener, aTarget_,
-                              aOriginAttributes, aResult);
+  return AsyncResolveInternal(aHostname, EmptyCString(), aType, aFlags, aListener,
+                              aTarget_, aOriginAttributes, aResult);
 }
 
 NS_IMETHODIMP
@@ -955,16 +1050,41 @@ nsDNSService::CancelAsyncResolve(const nsACString& aHostname, uint32_t aFlags,
     }
   }
 
-  return CancelAsyncResolveInternal(aHostname, RESOLVE_TYPE_DEFAULT, aFlags,
-                                    aListener, aReason, attrs);
+  return CancelAsyncResolveInternal(aHostname, EmptyCString(), RESOLVE_TYPE_DEFAULT,
+                                    aFlags, aListener, aReason, attrs);
 }
 
 NS_IMETHODIMP
 nsDNSService::CancelAsyncResolveNative(
     const nsACString& aHostname, uint32_t aFlags, nsIDNSListener* aListener,
     nsresult aReason, const OriginAttributes& aOriginAttributes) {
-  return CancelAsyncResolveInternal(aHostname, RESOLVE_TYPE_DEFAULT, aFlags,
-                                    aListener, aReason, aOriginAttributes);
+  return CancelAsyncResolveInternal(aHostname, EmptyCString(), RESOLVE_TYPE_DEFAULT,
+                                    aFlags, aListener, aReason, aOriginAttributes);
+}
+
+NS_IMETHODIMP
+nsDNSService::CancelAsyncResolveWithTrrServer(const nsACString& aHostname,
+    const nsACString& aTrrServer, uint32_t aFlags, nsIDNSListener* aListener,
+    nsresult aReason, JS::HandleValue aOriginAttributes, JSContext* aCx, uint8_t aArgc) {
+  OriginAttributes attrs;
+
+  if (aArgc == 1) {
+    if (!aOriginAttributes.isObject() || !attrs.Init(aCx, aOriginAttributes)) {
+      return NS_ERROR_INVALID_ARG;
+    }
+  }
+
+  return CancelAsyncResolveInternal(aHostname, aTrrServer, RESOLVE_TYPE_DEFAULT,
+                                    aFlags, aListener, aReason, attrs);
+}
+
+NS_IMETHODIMP
+nsDNSService::CancelAsyncResolveWithTrrServerNative(
+    const nsACString& aHostname, const nsACString& aTrrServer, uint32_t aFlags,
+    nsIDNSListener* aListener, nsresult aReason,
+    const OriginAttributes& aOriginAttributes) {
+  return CancelAsyncResolveInternal(aHostname, aTrrServer, RESOLVE_TYPE_DEFAULT,
+                                    aFlags, aListener, aReason, aOriginAttributes);
 }
 
 NS_IMETHODIMP
@@ -982,7 +1102,7 @@ nsDNSService::CancelAsyncResolveByType(const nsACString& aHostname,
     }
   }
 
-  return CancelAsyncResolveInternal(aHostname, aType, aFlags, aListener,
+  return CancelAsyncResolveInternal(aHostname, EmptyCString(), aType, aFlags, aListener,
                                     aReason, attrs);
 }
 
@@ -991,7 +1111,7 @@ nsDNSService::CancelAsyncResolveByTypeNative(
     const nsACString& aHostname, uint16_t aType, uint32_t aFlags,
     nsIDNSListener* aListener, nsresult aReason,
     const OriginAttributes& aOriginAttributes) {
-  return CancelAsyncResolveInternal(aHostname, aType, aFlags, aListener,
+  return CancelAsyncResolveInternal(aHostname, EmptyCString(), aType, aFlags, aListener,
                                     aReason, aOriginAttributes);
 }
 
@@ -1040,7 +1160,7 @@ nsresult nsDNSService::ResolveInternal(
     AutoLock lock(mLock);
     res = mResolver;
     idn = mIDN;
-    localDomain = mLocalDomains.GetEntry(aHostname);
+    localDomain = mLocalDomains.Contains(aHostname);
   }
 
   if (mNotifyResolution) {
@@ -1058,6 +1178,10 @@ nsresult nsDNSService::ResolveInternal(
   if (GetOffline() &&
       (!mOfflineLocalhost || !hostname.LowerCaseEqualsASCII("localhost"))) {
     flags |= RESOLVE_OFFLINE;
+  }
+
+  if (DNSForbiddenByActiveProxy(aHostname)) {
+    return NS_ERROR_UNKNOWN_PROXY_HOST;
   }
 
   //
@@ -1084,8 +1208,8 @@ nsresult nsDNSService::ResolveInternal(
     flags |= RESOLVE_DISABLE_TRR;
   }
 
-  rv = res->ResolveHost(hostname, RESOLVE_TYPE_DEFAULT, aOriginAttributes,
-                        flags, af, syncReq);
+  rv = res->ResolveHost(hostname, ""_ns, RESOLVE_TYPE_DEFAULT,
+                        aOriginAttributes, flags, af, syncReq);
   if (NS_SUCCEEDED(rv)) {
     // wait for result
     while (!syncReq->mDone) {

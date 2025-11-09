@@ -41,7 +41,7 @@ class CacheIndexIterator;
 const uint16_t kIndexTimeNotAvailable = 0xFFFFU;
 const uint16_t kIndexTimeOutOfBound = 0xFFFEU;
 
-typedef struct {
+using CacheIndexHeader = struct {
   // Version of the index. The index must be ignored and deleted when the file
   // on disk was written with a newer version.
   uint32_t mVersion;
@@ -58,7 +58,7 @@ typedef struct {
   // journal and start update process whenever this flag is set during index
   // parsing.
   uint32_t mIsDirty;
-} CacheIndexHeader;
+};
 
 static_assert(sizeof(CacheIndexHeader::mVersion) +
                       sizeof(CacheIndexHeader::mTimeStamp) +
@@ -68,7 +68,7 @@ static_assert(sizeof(CacheIndexHeader::mVersion) +
 
 #pragma pack(push, 1)
 struct CacheIndexRecord {
-  SHA1Sum::Hash mHash;
+  SHA1Sum::Hash mHash{};
   uint32_t mFrecency;
   OriginAttrsHash mOriginAttrsHash;
   uint16_t mOnStartTime;
@@ -110,8 +110,8 @@ static_assert(sizeof(CacheIndexRecord::mHash) +
 
 class CacheIndexEntry : public PLDHashEntryHdr {
  public:
-  typedef const SHA1Sum::Hash& KeyType;
-  typedef const SHA1Sum::Hash* KeyTypePointer;
+  using KeyType = const SHA1Sum::Hash&;
+  using KeyTypePointer = const SHA1Sum::Hash*;
 
   explicit CacheIndexEntry(KeyTypePointer aKey) {
     MOZ_COUNT_CTOR(CacheIndexEntry);

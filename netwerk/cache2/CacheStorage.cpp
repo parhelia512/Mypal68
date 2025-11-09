@@ -19,15 +19,14 @@
 #include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
 
-namespace mozilla {
-namespace net {
+namespace mozilla::net {
 
 NS_IMPL_ISUPPORTS(CacheStorage, nsICacheStorage)
 
 CacheStorage::CacheStorage(nsILoadContextInfo* aInfo, bool aAllowDisk,
                            bool aLookupAppCache, bool aSkipSizeCheck,
                            bool aPinning)
-    : mLoadContextInfo(GetLoadContextInfo(aInfo)),
+    : mLoadContextInfo(aInfo ? GetLoadContextInfo(aInfo) : nullptr),
       mWriteToDisk(aAllowDisk),
       mLookupAppCache(aLookupAppCache),
       mSkipSizeCheck(aSkipSizeCheck),
@@ -251,5 +250,4 @@ nsresult CacheStorage::ChooseApplicationCache(nsIURI* aURI,
   return NS_OK;
 }
 
-}  // namespace net
-}  // namespace mozilla
+}  // namespace mozilla::net

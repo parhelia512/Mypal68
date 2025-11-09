@@ -14,10 +14,12 @@
 #include "nsHttpConnectionInfo.h"
 
 #include "mozilla/net/DNS.h"
+#include "mozilla/net/NeckoChannelParams.h"
 #include "nsComponentManagerUtils.h"
 #include "nsICryptoHash.h"
 #include "nsIProtocolProxyService.h"
 #include "nsNetCID.h"
+#include "nsProxyInfo.h"
 #include "prnetdb.h"
 
 static nsresult SHA256(const char* aPlainText, nsAutoCString& aResult) {
@@ -296,6 +298,9 @@ void nsHttpConnectionInfo::SetOriginServer(const nsACString& host,
   BuildHashKey();
 }
 
+// Note that this function needs to be synced with
+// nsHttpConnectionInfo::DeserializeHttpConnectionInfoCloneArgs to make sure
+// nsHttpConnectionInfo can be serialized/deserialized.
 already_AddRefed<nsHttpConnectionInfo> nsHttpConnectionInfo::Clone() const {
   RefPtr<nsHttpConnectionInfo> clone;
   if (mRoutedHost.IsEmpty()) {
@@ -325,6 +330,76 @@ already_AddRefed<nsHttpConnectionInfo> nsHttpConnectionInfo::Clone() const {
   return clone.forget();
 }
 
+/* static */
+void nsHttpConnectionInfo::SerializeHttpConnectionInfo(
+    nsHttpConnectionInfo* aInfo, HttpConnectionInfoCloneArgs& aArgs) {
+  aArgs.host() = aInfo->GetOrigin();
+  aArgs.port() = aInfo->OriginPort();
+  aArgs.npnToken() = aInfo->GetNPNToken();
+  aArgs.username() = aInfo->GetUsername();
+  aArgs.originAttributes() = aInfo->GetOriginAttributes();
+  aArgs.endToEndSSL() = aInfo->EndToEndSSL();
+  aArgs.routedHost() = aInfo->GetRoutedHost();
+  aArgs.routedPort() = aInfo->RoutedPort();
+  aArgs.anonymous() = aInfo->GetAnonymous();
+  aArgs.aPrivate() = aInfo->GetPrivate();
+  aArgs.insecureScheme() = aInfo->GetInsecureScheme();
+  aArgs.noSpdy() = aInfo->GetNoSpdy();
+  aArgs.beConservative() = aInfo->GetBeConservative();
+  aArgs.tlsFlags() = aInfo->GetTlsFlags();
+  aArgs.isolated() = aInfo->GetIsolated();
+  aArgs.isTrrServiceChannel() = aInfo->GetIsTrrServiceChannel();
+  aArgs.trrDisabled() = aInfo->GetTrrDisabled();
+  aArgs.isIPv4Disabled() = aInfo->GetIPv4Disabled();
+  aArgs.isIPv6Disabled() = aInfo->GetIPv6Disabled();
+  aArgs.topWindowOrigin() = aInfo->GetTopWindowOrigin();
+
+  if (!aInfo->ProxyInfo()) {
+    return;
+  }
+
+  nsTArray<ProxyInfoCloneArgs> proxyInfoArray;
+  nsProxyInfo::SerializeProxyInfo(aInfo->ProxyInfo(), proxyInfoArray);
+  aArgs.proxyInfo() = proxyInfoArray;
+}
+
+// This function needs to be synced with nsHttpConnectionInfo::Clone.
+/* static */
+already_AddRefed<nsHttpConnectionInfo>
+nsHttpConnectionInfo::DeserializeHttpConnectionInfoCloneArgs(
+    const HttpConnectionInfoCloneArgs& aInfoArgs) {
+  nsProxyInfo* pi = nsProxyInfo::DeserializeProxyInfo(aInfoArgs.proxyInfo());
+  RefPtr<nsHttpConnectionInfo> cinfo;
+  if (aInfoArgs.routedHost().IsEmpty()) {
+    cinfo = new nsHttpConnectionInfo(
+        aInfoArgs.host(), aInfoArgs.port(), aInfoArgs.npnToken(),
+        aInfoArgs.username(), aInfoArgs.topWindowOrigin(), pi,
+        aInfoArgs.originAttributes(), aInfoArgs.endToEndSSL(),
+        aInfoArgs.isolated());
+  } else {
+    MOZ_ASSERT(aInfoArgs.endToEndSSL());
+    cinfo = new nsHttpConnectionInfo(
+        aInfoArgs.host(), aInfoArgs.port(), aInfoArgs.npnToken(),
+        aInfoArgs.username(), aInfoArgs.topWindowOrigin(), pi,
+        aInfoArgs.originAttributes(), aInfoArgs.routedHost(),
+        aInfoArgs.routedPort(), aInfoArgs.isolated());
+  }
+
+  // Make sure the anonymous, insecure-scheme, and private flags are transferred
+  cinfo->SetAnonymous(aInfoArgs.anonymous());
+  cinfo->SetPrivate(aInfoArgs.aPrivate());
+  cinfo->SetInsecureScheme(aInfoArgs.insecureScheme());
+  cinfo->SetNoSpdy(aInfoArgs.noSpdy());
+  cinfo->SetBeConservative(aInfoArgs.beConservative());
+  cinfo->SetTlsFlags(aInfoArgs.tlsFlags());
+  cinfo->SetIsTrrServiceChannel(aInfoArgs.isTrrServiceChannel());
+  cinfo->SetTrrDisabled(aInfoArgs.trrDisabled());
+  cinfo->SetIPv4Disabled(aInfoArgs.isIPv4Disabled());
+  cinfo->SetIPv6Disabled(aInfoArgs.isIPv6Disabled());
+
+  return cinfo.forget();
+}
+
 void nsHttpConnectionInfo::CloneAsDirectRoute(nsHttpConnectionInfo** outCI) {
   if (mRoutedHost.IsEmpty()) {
     RefPtr<nsHttpConnectionInfo> clone = Clone();
@@ -333,8 +408,8 @@ void nsHttpConnectionInfo::CloneAsDirectRoute(nsHttpConnectionInfo** outCI) {
   }
 
   RefPtr<nsHttpConnectionInfo> clone = new nsHttpConnectionInfo(
-      mOrigin, mOriginPort, EmptyCString(), mUsername, mTopWindowOrigin,
-      mProxyInfo, mOriginAttributes, mEndToEndSSL, mIsolated);
+      mOrigin, mOriginPort, ""_ns, mUsername, mTopWindowOrigin, mProxyInfo,
+      mOriginAttributes, mEndToEndSSL, mIsolated);
   // Make sure the anonymous, insecure-scheme, and private flags are transferred
   clone->SetAnonymous(GetAnonymous());
   clone->SetPrivate(GetPrivate());

@@ -7,8 +7,7 @@
 
 #include "nsISubstitutingProtocolHandler.h"
 
-#include "nsISubstitutionObserver.h"
-#include "nsDataHashtable.h"
+#include "nsTHashMap.h"
 #include "nsStandardURL.h"
 #include "nsJARURI.h"
 #include "mozilla/chrome/RegistryMessageUtils.h"
@@ -91,12 +90,8 @@ class SubstitutingProtocolHandler {
 
  private:
   struct SubstitutionEntry {
-    SubstitutionEntry() : flags(0) {}
-
-    ~SubstitutionEntry() = default;
-
     nsCOMPtr<nsIURI> baseURI;
-    uint32_t flags;
+    uint32_t flags = 0;
   };
 
   // Notifies all observers that a new substitution from |aRoot| to
@@ -107,12 +102,8 @@ class SubstitutingProtocolHandler {
   Maybe<uint32_t> mFlags;
 
   RWLock mSubstitutionsLock;
-  nsDataHashtable<nsCStringHashKey, SubstitutionEntry> mSubstitutions;
+  nsTHashMap<nsCStringHashKey, SubstitutionEntry> mSubstitutions;
   nsCOMPtr<nsIIOService> mIOService;
-
-  // The list of observers added with AddObserver that will be
-  // notified when substitutions are set or unset.
-  nsTArray<nsCOMPtr<nsISubstitutionObserver>> mObservers;
 
   // Returns a SubstitutingJARURI if |aUrl| maps to a |jar:| URI,
   // otherwise will return |aURL|

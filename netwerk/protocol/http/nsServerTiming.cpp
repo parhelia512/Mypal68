@@ -85,7 +85,7 @@ void ServerTimingParser::Parse() {
         if (!currentValue.IsEmpty()) {
           timingHeader->SetDescription(currentValue);
         } else {
-          timingHeader->SetDescription(EmptyCString());
+          timingHeader->SetDescription(""_ns);
         }
         foundDescription = true;
       }

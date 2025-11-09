@@ -99,7 +99,7 @@ nsresult nsBaseChannel::Redirect(nsIChannel* newChannel, uint32_t redirectFlags,
   // nsBaseChannel hst no thing to do with HttpBaseChannel, we would not care
   // about referrer and remote address in this case
   nsCOMPtr<nsIRedirectHistoryEntry> entry =
-      new net::nsRedirectHistoryEntry(uriPrincipal, nullptr, EmptyCString());
+      new net::nsRedirectHistoryEntry(uriPrincipal, nullptr, ""_ns);
 
   newLoadInfo->AppendRedirectHistoryEntry(entry, isInternalRedirect);
 
@@ -783,7 +783,10 @@ NS_IMETHODIMP
 nsBaseChannel::OnStartRequest(nsIRequest* request) {
   MOZ_ASSERT_IF(mRequest, request == mRequest);
 
-  if (mPump) {
+  nsAutoCString scheme;
+  mURI->GetScheme(scheme);
+
+  if (mPump && !scheme.EqualsLiteral("ftp")) {
     // If our content type is unknown, use the content type
     // sniffer. If the sniffer is not available for some reason, then we just
     // keep going as-is.

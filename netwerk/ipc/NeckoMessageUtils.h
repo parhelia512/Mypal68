@@ -7,7 +7,8 @@
 
 #include "mozilla/DebugOnly.h"
 
-#include "ipc/IPCMessageUtils.h"
+#include "ipc/EnumSerializer.h"
+#include "ipc/IPCMessageUtilsSpecializations.h"
 #include "nsExceptionHandler.h"
 #include "nsIHttpChannel.h"
 #include "nsPrintfCString.h"

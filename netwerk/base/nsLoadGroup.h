@@ -62,6 +62,10 @@ class nsLoadGroup : public nsILoadGroup,
   nsresult MergeLoadFlags(nsIRequest* aRequest, nsLoadFlags& flags);
   nsresult MergeDefaultLoadFlags(nsIRequest* aRequest, nsLoadFlags& flags);
 
+ private:
+  nsresult RemoveRequestFromHashtable(nsIRequest* aRequest, nsresult aStatus);
+  nsresult NotifyRemovalObservers(nsIRequest* aRequest, nsresult aStatus);
+
  protected:
   uint32_t mForegroundCount;
   uint32_t mLoadFlags;
@@ -83,8 +87,6 @@ class nsLoadGroup : public nsILoadGroup,
   bool mIsCanceling;
   bool mDefaultLoadIsTimed;
   bool mBrowsingContextDiscarded;
-
-  nsCString mUserAgentOverrideCache;
 };
 
 }  // namespace net

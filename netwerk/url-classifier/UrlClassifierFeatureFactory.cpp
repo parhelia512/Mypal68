@@ -5,12 +5,6 @@
 #include "mozilla/net/UrlClassifierFeatureFactory.h"
 
 // List of Features
-#include "UrlClassifierFeatureCryptominingAnnotation.h"
-#include "UrlClassifierFeatureCryptominingProtection.h"
-#include "UrlClassifierFeatureFingerprintingAnnotation.h"
-#include "UrlClassifierFeatureFingerprintingProtection.h"
-#include "UrlClassifierFeatureLoginReputation.h"
-#include "UrlClassifierFeaturePhishingProtection.h"
 #include "UrlClassifierFeatureTrackingProtection.h"
 #include "UrlClassifierFeatureTrackingAnnotation.h"
 #include "UrlClassifierFeatureCustomTables.h"
@@ -27,12 +21,6 @@ void UrlClassifierFeatureFactory::Shutdown() {
     return;
   }
 
-  UrlClassifierFeatureCryptominingAnnotation::MaybeShutdown();
-  UrlClassifierFeatureCryptominingProtection::MaybeShutdown();
-  UrlClassifierFeatureFingerprintingAnnotation::MaybeShutdown();
-  UrlClassifierFeatureFingerprintingProtection::MaybeShutdown();
-  UrlClassifierFeatureLoginReputation::MaybeShutdown();
-  UrlClassifierFeaturePhishingProtection::MaybeShutdown();
   UrlClassifierFeatureTrackingAnnotation::MaybeShutdown();
   UrlClassifierFeatureTrackingProtection::MaybeShutdown();
 }
@@ -51,32 +39,8 @@ void UrlClassifierFeatureFactory::GetFeaturesFromChannel(
   // feature order, and this could produce different results with a different
   // feature ordering.
 
-  // Cryptomining Protection
-  feature = UrlClassifierFeatureCryptominingProtection::MaybeCreate(aChannel);
-  if (feature) {
-    aFeatures.AppendElement(feature);
-  }
-
-  // Fingerprinting Protection
-  feature = UrlClassifierFeatureFingerprintingProtection::MaybeCreate(aChannel);
-  if (feature) {
-    aFeatures.AppendElement(feature);
-  }
-
   // Tracking Protection
   feature = UrlClassifierFeatureTrackingProtection::MaybeCreate(aChannel);
-  if (feature) {
-    aFeatures.AppendElement(feature);
-  }
-
-  // Cryptomining Annotation
-  feature = UrlClassifierFeatureCryptominingAnnotation::MaybeCreate(aChannel);
-  if (feature) {
-    aFeatures.AppendElement(feature);
-  }
-
-  // Fingerprinting Annotation
-  feature = UrlClassifierFeatureFingerprintingAnnotation::MaybeCreate(aChannel);
   if (feature) {
     aFeatures.AppendElement(feature);
   }
@@ -89,18 +53,6 @@ void UrlClassifierFeatureFactory::GetFeaturesFromChannel(
 }
 
 /* static */
-void UrlClassifierFeatureFactory::GetPhishingProtectionFeatures(
-    nsTArray<RefPtr<nsIUrlClassifierFeature>>& aFeatures) {
-  UrlClassifierFeaturePhishingProtection::MaybeCreate(aFeatures);
-}
-
-/* static */
-nsIUrlClassifierFeature*
-UrlClassifierFeatureFactory::GetFeatureLoginReputation() {
-  return UrlClassifierFeatureLoginReputation::MaybeGetOrCreate();
-}
-
-/* static */
 already_AddRefed<nsIUrlClassifierFeature>
 UrlClassifierFeatureFactory::GetFeatureByName(const nsACString& aName) {
   if (!XRE_IsParentProcess()) {
@@ -108,32 +60,6 @@ UrlClassifierFeatureFactory::GetFeatureByName(const nsACString& aName) {
   }
 
   nsCOMPtr<nsIUrlClassifierFeature> feature;
-
-  // Cryptomining Annotation
-  feature = UrlClassifierFeatureCryptominingAnnotation::GetIfNameMatches(aName);
-  if (feature) {
-    return feature.forget();
-  }
-
-  // Cryptomining Protection
-  feature = UrlClassifierFeatureCryptominingProtection::GetIfNameMatches(aName);
-  if (feature) {
-    return feature.forget();
-  }
-
-  // Fingerprinting Annotation
-  feature =
-      UrlClassifierFeatureFingerprintingAnnotation::GetIfNameMatches(aName);
-  if (feature) {
-    return feature.forget();
-  }
-
-  // Fingerprinting Protection
-  feature =
-      UrlClassifierFeatureFingerprintingProtection::GetIfNameMatches(aName);
-  if (feature) {
-    return feature.forget();
-  }
 
   // Tracking Protection
   feature = UrlClassifierFeatureTrackingProtection::GetIfNameMatches(aName);
@@ -143,18 +69,6 @@ UrlClassifierFeatureFactory::GetFeatureByName(const nsACString& aName) {
 
   // Tracking Annotation
   feature = UrlClassifierFeatureTrackingAnnotation::GetIfNameMatches(aName);
-  if (feature) {
-    return feature.forget();
-  }
-
-  // Login reputation
-  feature = UrlClassifierFeatureLoginReputation::GetIfNameMatches(aName);
-  if (feature) {
-    return feature.forget();
-  }
-
-  // PhishingProtection features
-  feature = UrlClassifierFeaturePhishingProtection::GetIfNameMatches(aName);
   if (feature) {
     return feature.forget();
   }
@@ -170,30 +84,6 @@ void UrlClassifierFeatureFactory::GetFeatureNames(nsTArray<nsCString>& aArray) {
 
   nsAutoCString name;
 
-  // Cryptomining Annotation
-  name.Assign(UrlClassifierFeatureCryptominingAnnotation::Name());
-  if (!name.IsEmpty()) {
-    aArray.AppendElement(name);
-  }
-
-  // Cryptomining Protection
-  name.Assign(UrlClassifierFeatureCryptominingProtection::Name());
-  if (!name.IsEmpty()) {
-    aArray.AppendElement(name);
-  }
-
-  // Fingerprinting Annotation
-  name.Assign(UrlClassifierFeatureFingerprintingAnnotation::Name());
-  if (!name.IsEmpty()) {
-    aArray.AppendElement(name);
-  }
-
-  // Fingerprinting Protection
-  name.Assign(UrlClassifierFeatureFingerprintingProtection::Name());
-  if (!name.IsEmpty()) {
-    aArray.AppendElement(name);
-  }
-
   // Tracking Protection
   name.Assign(UrlClassifierFeatureTrackingProtection::Name());
   if (!name.IsEmpty()) {
@@ -204,19 +94,6 @@ void UrlClassifierFeatureFactory::GetFeatureNames(nsTArray<nsCString>& aArray) {
   name.Assign(UrlClassifierFeatureTrackingAnnotation::Name());
   if (!name.IsEmpty()) {
     aArray.AppendElement(name);
-  }
-
-  // Login reputation
-  name.Assign(UrlClassifierFeatureLoginReputation::Name());
-  if (!name.IsEmpty()) {
-    aArray.AppendElement(name);
-  }
-
-  // PhishingProtection features
-  {
-    nsTArray<nsCString> features;
-    UrlClassifierFeaturePhishingProtection::GetFeatureNames(features);
-    aArray.AppendElements(features);
   }
 }
 
@@ -243,12 +120,6 @@ struct BlockingErrorCode {
 static const BlockingErrorCode sBlockingErrorCodes[] = {
     {NS_ERROR_TRACKING_URI,
      nsIWebProgressListener::STATE_BLOCKED_TRACKING_CONTENT,
-     "TrackerUriBlocked", NS_LITERAL_CSTRING("Tracking Protection")},
-    {NS_ERROR_FINGERPRINTING_URI,
-     nsIWebProgressListener::STATE_BLOCKED_FINGERPRINTING_CONTENT,
-     "TrackerUriBlocked", NS_LITERAL_CSTRING("Tracking Protection")},
-    {NS_ERROR_CRYPTOMINING_URI,
-     nsIWebProgressListener::STATE_BLOCKED_CRYPTOMINING_CONTENT,
      "TrackerUriBlocked", NS_LITERAL_CSTRING("Tracking Protection")},
 };
 

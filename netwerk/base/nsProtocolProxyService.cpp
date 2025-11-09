@@ -228,11 +228,14 @@ class nsAsyncResolveRequest final : public nsIRunnable,
   };
 
   void EnsureResolveFlagsMatch() {
-    nsCOMPtr<nsIProxyInfo> proxyInfo = mProxyInfo;
-    while (proxyInfo) {
-      proxyInfo->SetResolveFlags(mResolveFlags);
-      proxyInfo->GetFailoverProxy(getter_AddRefs(proxyInfo));
+    nsCOMPtr<nsProxyInfo> pi = do_QueryInterface(mProxyInfo);
+    if (!pi || pi->ResolveFlags() == mResolveFlags) {
+      return;
     }
+
+    nsCOMPtr<nsIProxyInfo> proxyInfo =
+        pi->CloneProxyInfoWithNewResolveFlags(mResolveFlags);
+    mProxyInfo.swap(proxyInfo);
   }
 
  public:
@@ -1329,7 +1332,7 @@ void nsProtocolProxyService::DisableProxy(nsProxyInfo* pi) {
 
   // If this fails, oh well... means we don't have enough memory
   // to remember the failed proxy.
-  mFailedProxies.Put(key, dsec);
+  mFailedProxies.InsertOrUpdate(key, dsec);
 }
 
 bool nsProtocolProxyService::IsProxyDisabled(nsProxyInfo* pi) {
@@ -1605,8 +1608,8 @@ nsProtocolProxyService::NewProxyInfo(
     const nsACString& aConnectionIsolationKey, uint32_t aFlags,
     uint32_t aFailoverTimeout, nsIProxyInfo* aFailoverProxy,
     nsIProxyInfo** aResult) {
-  return NewProxyInfoWithAuth(aType, aHost, aPort, EmptyCString(),
-                              EmptyCString(), aProxyAuthorizationHeader,
+  return NewProxyInfoWithAuth(aType, aHost, aPort, ""_ns, ""_ns,
+                              aProxyAuthorizationHeader,
                               aConnectionIsolationKey, aFlags, aFailoverTimeout,
                               aFailoverProxy, aResult);
 }
@@ -2201,8 +2204,7 @@ nsresult nsProtocolProxyService::Resolve_Internal(nsIChannel* channel,
   }
 
   if (type) {
-    rv = NewProxyInfo_Internal(type, *host, port, EmptyCString(),
-                               EmptyCString(), EmptyCString(), EmptyCString(),
+    rv = NewProxyInfo_Internal(type, *host, port, ""_ns, ""_ns, ""_ns, ""_ns,
                                proxyFlags, UINT32_MAX, nullptr, flags, result);
     if (NS_FAILED(rv)) return rv;
   }
@@ -2249,12 +2251,12 @@ bool nsProtocolProxyService::ApplyFilter(
       return false;
     }
 
-    rv = filterLink->filter->ApplyFilter(this, uri, list, callback);
+    rv = filterLink->filter->ApplyFilter(uri, list, callback);
     return NS_SUCCEEDED(rv);
   }
 
   if (filterLink->channelFilter) {
-    rv = filterLink->channelFilter->ApplyFilter(this, channel, list, callback);
+    rv = filterLink->channelFilter->ApplyFilter(channel, list, callback);
     return NS_SUCCEEDED(rv);
   }
 

@@ -13,6 +13,9 @@ include IPCStream;
 include PBackgroundSharedTypes;
 include DOMTypes;
 
+include "mozilla/dom/ReferrerInfoUtils.h";
+include "mozilla/ipc/URIUtils.h";
+
 using mozilla::OriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 using RequestHeaderTuples from "mozilla/net/PHttpChannelParams.h";
 using struct nsHttpAtom from "nsHttp.h";
@@ -299,6 +302,46 @@ union HttpChannelCreationArgs
   HttpChannelConnectArgs;   // Used for redirected-to channels
 };
 
+struct ProxyInfoCloneArgs
+{
+  nsCString type;
+  nsCString host;
+  int32_t port;
+  nsCString username;
+  nsCString password;
+  uint32_t flags;
+  uint32_t timeout;
+  uint32_t resolveFlags;
+  nsCString proxyAuthorizationHeader;
+  nsCString connectionIsolationKey;
+};
+
+struct HttpConnectionInfoCloneArgs
+{
+  nsCString host;
+  int32_t port;
+  nsCString npnToken;
+  nsCString username;
+  OriginAttributes originAttributes;
+  bool endToEndSSL;
+  nsCString routedHost;
+  int32_t routedPort;
+  bool anonymous;
+  bool aPrivate; // use prefix to avoid code generation error
+  bool insecureScheme;
+  bool noSpdy;
+  bool beConservative;
+  uint32_t tlsFlags;
+  bool isolated;
+  bool isTrrServiceChannel;
+  bool trrDisabled;
+  bool isIPv4Disabled;
+  bool isIPv6Disabled;
+  nsCString topWindowOrigin;
+  bool isHttp3;
+  ProxyInfoCloneArgs[] proxyInfo;
+};
+
 //-----------------------------------------------------------------------------
 // FTP IPDL structs
 //-----------------------------------------------------------------------------
@@ -386,6 +429,26 @@ struct ResourceTimingStructArgs {
   // the rest of the timings so the timing information in the child is complete.
   TimeStamp cacheReadStart;
   TimeStamp cacheReadEnd;
+};
+
+struct HttpActivity
+{
+  nsCString host;
+  int32_t port;
+  bool endToEndSSL;
+};
+
+union HttpActivityArgs
+{
+  uint64_t;
+  HttpActivity;
+};
+
+struct TransactionObserverResult
+{
+  bool versionOk;
+  bool authOk;
+  nsresult closeReason;
 };
 
 } // namespace net

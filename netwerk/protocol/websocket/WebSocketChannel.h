@@ -134,29 +134,30 @@ class WebSocketChannel : public BaseWebSocketChannel,
   friend class CallAcknowledge;
 
   // Common send code for binary + text msgs
-  MOZ_MUST_USE nsresult SendMsgCommon(const nsACString& aMsg, bool isBinary,
-                                      uint32_t length,
-                                      nsIInputStream* aStream = nullptr);
+  [[nodiscard]] nsresult SendMsgCommon(const nsACString& aMsg, bool isBinary,
+                                       uint32_t length,
+                                       nsIInputStream* aStream = nullptr);
 
-  void EnqueueOutgoingMessage(nsDeque& aQueue, OutboundMessage* aMsg);
+  void EnqueueOutgoingMessage(nsDeque<OutboundMessage>& aQueue,
+                              OutboundMessage* aMsg);
 
   void PrimeNewOutgoingMessage();
   void DeleteCurrentOutGoingMessage();
   void GeneratePong(uint8_t* payload, uint32_t len);
   void GeneratePing();
 
-  MOZ_MUST_USE nsresult OnNetworkChangedTargetThread();
-  MOZ_MUST_USE nsresult OnNetworkChanged();
-  MOZ_MUST_USE nsresult StartPinging();
+  [[nodiscard]] nsresult OnNetworkChanged();
+  [[nodiscard]] nsresult StartPinging();
+  [[nodiscard]] nsresult OnNetworkChangedTargetThread();
 
   void BeginOpen(bool aCalledFromAdmissionManager);
   void BeginOpenInternal();
-  MOZ_MUST_USE nsresult HandleExtensions();
-  MOZ_MUST_USE nsresult SetupRequest();
-  MOZ_MUST_USE nsresult ApplyForAdmission();
-  MOZ_MUST_USE nsresult DoAdmissionDNS();
-  MOZ_MUST_USE nsresult CallStartWebsocketData();
-  MOZ_MUST_USE nsresult StartWebsocketData();
+  [[nodiscard]] nsresult HandleExtensions();
+  [[nodiscard]] nsresult SetupRequest();
+  [[nodiscard]] nsresult ApplyForAdmission();
+  [[nodiscard]] nsresult DoAdmissionDNS();
+  [[nodiscard]] nsresult CallStartWebsocketData();
+  [[nodiscard]] nsresult StartWebsocketData();
   uint16_t ResultToCloseCode(nsresult resultCode);
 
   void StopSession(nsresult reason);
@@ -172,10 +173,10 @@ class WebSocketChannel : public BaseWebSocketChannel,
   static void ApplyMask(uint32_t mask, uint8_t* data, uint64_t len);
 
   bool IsPersistentFramePtr();
-  MOZ_MUST_USE nsresult ProcessInput(uint8_t* buffer, uint32_t count);
-  MOZ_MUST_USE bool UpdateReadBuffer(uint8_t* buffer, uint32_t count,
-                                     uint32_t accumulatedFragments,
-                                     uint32_t* available);
+  [[nodiscard]] nsresult ProcessInput(uint8_t* buffer, uint32_t count);
+  [[nodiscard]] bool UpdateReadBuffer(uint8_t* buffer, uint32_t count,
+                                      uint32_t accumulatedFragments,
+                                      uint32_t* available);
 
   inline void ResetPingTimer() {
     mPingOutstanding = 0;
@@ -282,9 +283,9 @@ class WebSocketChannel : public BaseWebSocketChannel,
 
   OutboundMessage* mCurrentOut;
   uint32_t mCurrentOutSent;
-  nsDeque mOutgoingMessages;
-  nsDeque mOutgoingPingMessages;
-  nsDeque mOutgoingPongMessages;
+  nsDeque<OutboundMessage> mOutgoingMessages;
+  nsDeque<OutboundMessage> mOutgoingPingMessages;
+  nsDeque<OutboundMessage> mOutgoingPongMessages;
   uint32_t mHdrOutToSend;
   uint8_t* mHdrOut;
   uint8_t mOutHeader[kCopyBreak + 16];

@@ -102,12 +102,12 @@ NS_IMPL_ISUPPORTS(nsNotifyAddrListener, nsINetworkLinkService, nsIRunnable,
                   nsIObserver)
 
 nsNotifyAddrListener::nsNotifyAddrListener()
-    : mLinkUp(true)  // assume true by default
-      ,
+    : mLinkUp(true),  // assume true by default
       mStatusKnown(false),
       mCheckAttempted(false),
       mCheckEvent(nullptr),
       mShutdown(false),
+      mFoundVPN(false),
       mIPInterfaceChecksum(0),
       mAllowChangedEvent(true),
       mIPv6Changes(false),
@@ -143,6 +143,12 @@ nsNotifyAddrListener::GetLinkType(uint32_t* aLinkType) {
 
   // XXX This function has not yet been implemented for this platform
   *aLinkType = nsINetworkLinkService::LINK_TYPE_UNKNOWN;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNotifyAddrListener::GetVpnDetected(bool* aHasVPN) {
+  *aHasVPN = mFoundVPN;
   return NS_OK;
 }
 
@@ -580,6 +586,7 @@ nsNotifyAddrListener::CheckAdaptersAddresses(void) {
   //
   ULONG sumAll = 0;
 
+  mFoundVPN = false;
   if (ret == ERROR_SUCCESS) {
     bool linkUp = false;
     ULONG sum = 0;
@@ -591,6 +598,11 @@ nsNotifyAddrListener::CheckAdaptersAddresses(void) {
           adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK ||
           CheckICSGateway(adapter)) {
         continue;
+      }
+
+      if (adapter->IfType == IF_TYPE_PPP) {
+        LOG(("VPN connection found"));
+        mFoundVPN = true;
       }
 
       sum <<= 2;

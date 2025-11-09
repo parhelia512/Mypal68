@@ -8,25 +8,29 @@
 #include "nsCRT.h"
 #include "nsUnicharUtils.h"
 #include "nsUnicodeProperties.h"
-#include "nsUnicodeScriptCodes.h"
 #include "harfbuzz/hb.h"
 #include "punycode.h"
+#include "mozilla/Casting.h"
 #include "mozilla/TextUtils.h"
 #include "mozilla/Utf8.h"
+#include "mozilla/intl/FormatBuffer.h"
+#include "mozilla/intl/UnicodeProperties.h"
+#include "mozilla/intl/UnicodeScriptCodes.h"
+
+#include "ICUUtils.h"
+
+using namespace mozilla::intl;
+using namespace mozilla::unicode;
+using namespace mozilla::net;
+using mozilla::Preferences;
 
 // Currently we use the non-transitional processing option -- see
 // http://unicode.org/reports/tr46/
 // To switch to transitional processing, change the value of this flag
 // and kTransitionalProcessing in netwerk/test/unit/test_idna2008.js to true
 // (revert bug 1218179).
-const bool kIDNA2008_TransitionalProcessing = false;
-
-#include "ICUUtils.h"
-#include "unicode/uscript.h"
-
-using namespace mozilla::unicode;
-using namespace mozilla::net;
-using mozilla::Preferences;
+const intl::IDNA::ProcessingType kIDNA2008_DefaultProcessingType =
+    intl::IDNA::ProcessingType::NonTransitional;
 
 //-----------------------------------------------------------------------------
 // RFC 1034 - 3.1. Name space specifications and terminology
@@ -93,23 +97,23 @@ void nsIDNService::prefsChanged(const char* pref) {
   MOZ_ASSERT(NS_IsMainThread());
   mLock.AssertCurrentThreadOwns();
 
-  if (pref && NS_LITERAL_CSTRING(NS_NET_PREF_EXTRAALLOWED).Equals(pref)) {
+  if (pref && nsLiteralCString(NS_NET_PREF_EXTRAALLOWED).Equals(pref)) {
     InitializeBlocklist(mIDNBlocklist);
   }
-  if (pref && NS_LITERAL_CSTRING(NS_NET_PREF_EXTRABLOCKED).Equals(pref)) {
+  if (pref && nsLiteralCString(NS_NET_PREF_EXTRABLOCKED).Equals(pref)) {
     InitializeBlocklist(mIDNBlocklist);
   }
-  if (!pref || NS_LITERAL_CSTRING(NS_NET_PREF_SHOWPUNYCODE).Equals(pref)) {
+  if (!pref || nsLiteralCString(NS_NET_PREF_SHOWPUNYCODE).Equals(pref)) {
     bool val;
     if (NS_SUCCEEDED(Preferences::GetBool(NS_NET_PREF_SHOWPUNYCODE, &val)))
       mShowPunycode = val;
   }
-  if (!pref || NS_LITERAL_CSTRING(NS_NET_PREF_IDNUSEWHITELIST).Equals(pref)) {
+  if (!pref || nsLiteralCString(NS_NET_PREF_IDNUSEWHITELIST).Equals(pref)) {
     bool val;
     if (NS_SUCCEEDED(Preferences::GetBool(NS_NET_PREF_IDNUSEWHITELIST, &val)))
       mIDNUseWhitelist = val;
   }
-  if (!pref || NS_LITERAL_CSTRING(NS_NET_PREF_IDNRESTRICTION).Equals(pref)) {
+  if (!pref || nsLiteralCString(NS_NET_PREF_IDNRESTRICTION).Equals(pref)) {
     nsAutoCString profile;
     if (NS_FAILED(
             Preferences::GetCString(NS_NET_PREF_IDNRESTRICTION, profile))) {
@@ -132,83 +136,80 @@ nsIDNService::nsIDNService()
       mIDNUseWhitelist(false) {
   MOZ_ASSERT(NS_IsMainThread());
 
-  uint32_t IDNAOptions = UIDNA_CHECK_BIDI | UIDNA_CHECK_CONTEXTJ;
-  if (!kIDNA2008_TransitionalProcessing) {
-    IDNAOptions |= UIDNA_NONTRANSITIONAL_TO_UNICODE;
-  }
-  UErrorCode errorCode = U_ZERO_ERROR;
-  mIDNA = uidna_openUTS46(IDNAOptions, &errorCode);
+  auto createResult =
+      mozilla::intl::IDNA::TryCreate(kIDNA2008_DefaultProcessingType);
+  MOZ_ASSERT(createResult.isOk());
+  mIDNA = createResult.unwrap();
 }
 
 nsIDNService::~nsIDNService() {
   MOZ_ASSERT(NS_IsMainThread());
 
   Preferences::UnregisterPrefixCallbacks(PrefChanged, gCallbackPrefs, this);
-
-  uidna_close(mIDNA);
 }
 
 nsresult nsIDNService::IDNA2008ToUnicode(const nsACString& input,
                                          nsAString& output) {
   NS_ConvertUTF8toUTF16 inputStr(input);
-  UIDNAInfo info = UIDNA_INFO_INITIALIZER;
-  UErrorCode errorCode = U_ZERO_ERROR;
-  int32_t inLen = inputStr.Length();
-  int32_t outMaxLen = kMaxDNSNodeLen + 1;
-  UChar outputBuffer[kMaxDNSNodeLen + 1];
 
-  int32_t outLen =
-      uidna_labelToUnicode(mIDNA, (const UChar*)inputStr.get(), inLen,
-                           outputBuffer, outMaxLen, &info, &errorCode);
-  if (info.errors != 0) {
-    return NS_ERROR_MALFORMED_URI;
+  Span<const char16_t> inputSpan{inputStr};
+  intl::nsTStringToBufferAdapter buffer(output);
+  auto result = mIDNA->LabelToUnicode(inputSpan, buffer);
+
+  nsresult rv = NS_OK;
+  if (result.isErr()) {
+    rv = ICUUtils::ICUErrorToNsResult(result.unwrapErr());
+    if (rv == NS_ERROR_FAILURE) {
+      rv = NS_ERROR_MALFORMED_URI;
+    }
   }
+  NS_ENSURE_SUCCESS(rv, rv);
 
-  if (U_SUCCESS(errorCode)) {
-    ICUUtils::AssignUCharArrayToString(outputBuffer, outLen, output);
-  }
-
-  nsresult rv = ICUUtils::UErrorToNsResult(errorCode);
-  if (rv == NS_ERROR_FAILURE) {
+  intl::IDNA::Info info = result.unwrap();
+  if (info.HasErrors()) {
     rv = NS_ERROR_MALFORMED_URI;
   }
+
   return rv;
 }
 
 nsresult nsIDNService::IDNA2008StringPrep(const nsAString& input,
                                           nsAString& output,
                                           stringPrepFlag flag) {
-  UIDNAInfo info = UIDNA_INFO_INITIALIZER;
-  UErrorCode errorCode = U_ZERO_ERROR;
-  int32_t inLen = input.Length();
-  int32_t outMaxLen = kMaxDNSNodeLen + 1;
-  UChar outputBuffer[kMaxDNSNodeLen + 1];
+  Span<const char16_t> inputSpan{input};
+  intl::nsTStringToBufferAdapter buffer(output);
+  auto result = mIDNA->LabelToUnicode(inputSpan, buffer);
 
-  int32_t outLen =
-      uidna_labelToUnicode(mIDNA, (const UChar*)PromiseFlatString(input).get(),
-                           inLen, outputBuffer, outMaxLen, &info, &errorCode);
-  nsresult rv = ICUUtils::UErrorToNsResult(errorCode);
-  if (rv == NS_ERROR_FAILURE) {
-    rv = NS_ERROR_MALFORMED_URI;
+  nsresult rv = NS_OK;
+  if (result.isErr()) {
+    rv = ICUUtils::ICUErrorToNsResult(result.unwrapErr());
+    if (rv == NS_ERROR_FAILURE) {
+      rv = NS_ERROR_MALFORMED_URI;
+    }
   }
   NS_ENSURE_SUCCESS(rv, rv);
+
+  intl::IDNA::Info info = result.unwrap();
 
   // Output the result of nameToUnicode even if there were errors.
   // But in the case of invalid punycode, the uidna_labelToUnicode result
   // appears to get an appended U+FFFD REPLACEMENT CHARACTER, which will
   // confuse our subsequent processing, so we drop that.
   // (https://bugzilla.mozilla.org/show_bug.cgi?id=1399540#c9)
-  if ((info.errors & UIDNA_ERROR_PUNYCODE) && outLen > 0 &&
-      outputBuffer[outLen - 1] == 0xfffd) {
-    --outLen;
+  if (info.HasInvalidPunycode() && !output.IsEmpty() &&
+      output.Last() == 0xfffd) {
+    output.Truncate(output.Length() - 1);
   }
-  ICUUtils::AssignUCharArrayToString(outputBuffer, outLen, output);
 
   if (flag == eStringPrepIgnoreErrors) {
     return NS_OK;
   }
 
-  if (info.errors != 0) {
+  bool hasError = flag == eStringPrepForDNS
+                      ? info.HasErrors() && !info.HasInvalidHyphen()
+                      : info.HasErrors();
+
+  if (hasError) {
     if (flag == eStringPrepForDNS) {
       output.Truncate();
     }
@@ -321,16 +322,25 @@ nsresult nsIDNService::ACEtoUTF8(const nsACString& input, nsACString& _retval,
 }
 
 NS_IMETHODIMP nsIDNService::IsACE(const nsACString& input, bool* _retval) {
-  const char* data = input.BeginReading();
-  uint32_t dataLen = input.Length();
-
   // look for the ACE prefix in the input string.  it may occur
   // at the beginning of any segment in the domain name.  for
   // example: "www.xn--ENCODED.com"
 
-  const char* p = PL_strncasestr(data, kACEPrefix, dataLen);
+  if (!IsAscii(input)) {
+    *_retval = false;
+    return NS_OK;
+  }
 
-  *_retval = p && (p == data || *(p - 1) == '.');
+  auto stringContains = [](const nsACString& haystack,
+                           const nsACString& needle) {
+    return std::search(haystack.BeginReading(), haystack.EndReading(),
+                       needle.BeginReading(),
+                       needle.EndReading()) != haystack.EndReading();
+  };
+
+  *_retval = StringBeginsWith(input, "xn--"_ns) ||
+             (!input.IsEmpty() && input[0] != '.' &&
+              stringContains(input, ".xn--"_ns));
   return NS_OK;
 }
 
@@ -733,7 +743,7 @@ bool nsIDNService::isLabelSafe(const nsAString& label) {
     MOZ_ASSERT(idType == IDTYPE_ALLOWED);
 
     // Check for mixed script
-    Script script = GetScriptCode(ch);
+    Script script = UnicodeProperties::GetScriptCode(ch);
     if (script != Script::COMMON && script != Script::INHERITED &&
         script != lastScript) {
       if (illegalScriptCombo(script, savedScript)) {
@@ -744,7 +754,8 @@ bool nsIDNService::isLabelSafe(const nsAString& label) {
     // Check for mixed numbering systems
     auto genCat = GetGeneralCategory(ch);
     if (genCat == HB_UNICODE_GENERAL_CATEGORY_DECIMAL_NUMBER) {
-      uint32_t zeroCharacter = ch - GetNumericValue(ch);
+      uint32_t zeroCharacter =
+          ch - mozilla::intl::UnicodeProperties::GetNumericValue(ch);
       if (savedNumberingSystem == 0) {
         // If we encounter a decimal number, save the zero character from that
         // numbering system.
@@ -761,18 +772,17 @@ bool nsIDNService::isLabelSafe(const nsAString& label) {
       }
       // Check for marks whose expected script doesn't match the base script.
       if (lastScript != Script::INVALID) {
-        const size_t kMaxScripts = 32;  // more than ample for current values
-                                        // of ScriptExtensions property
-        UScriptCode scripts[kMaxScripts];
-        UErrorCode errorCode = U_ZERO_ERROR;
-        int nScripts =
-            uscript_getScriptExtensions(ch, scripts, kMaxScripts, &errorCode);
-        MOZ_ASSERT(U_SUCCESS(errorCode), "uscript_getScriptExtensions failed");
-        if (U_FAILURE(errorCode)) {
+        UnicodeProperties::ScriptExtensionVector scripts;
+        auto extResult = UnicodeProperties::GetExtensions(ch, scripts);
+        MOZ_ASSERT(extResult.isOk());
+        if (extResult.isErr()) {
           return false;
         }
+
+        int nScripts = AssertedCast<int>(scripts.length());
+
         // nScripts will always be >= 1, because even for undefined characters
-        // uscript_getScriptExtensions will return Script::INVALID.
+        // it will return Script::INVALID.
         // If the mark just has script=COMMON or INHERITED, we can't check any
         // more carefully, but if it has specific scriptExtension codes, then
         // assume those are the only valid scripts to use it with.

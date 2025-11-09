@@ -124,6 +124,9 @@ enum class SpdyVersion {
 // The connection should not use IPv6
 #define NS_HTTP_DISABLE_IPV6 (1 << 18)
 
+// The connection could bring the peeked data for sniffing
+#define NS_HTTP_CALL_CONTENT_SNIFFER (1 << 21)
+
 //-----------------------------------------------------------------------------
 // some default values
 //-----------------------------------------------------------------------------
@@ -131,13 +134,17 @@ enum class SpdyVersion {
 #define NS_HTTP_DEFAULT_PORT 80
 #define NS_HTTPS_DEFAULT_PORT 443
 
-#define NS_HTTP_HEADER_SEPS ", \t"
+#define NS_HTTP_HEADER_SEP ','
 
 //-----------------------------------------------------------------------------
 // http atoms...
 //-----------------------------------------------------------------------------
 
 struct nsHttpAtom {
+  nsHttpAtom() : _val(nullptr){};
+  explicit nsHttpAtom(const char* val) : _val(val) {}
+  nsHttpAtom(const nsHttpAtom& other) = default;
+
   operator const char*() const { return _val; }
   const char* get() const { return _val; }
 
@@ -328,6 +335,11 @@ class ParsedHeaderValueListList {
 };
 
 void LogHeaders(const char* lineStart);
+
+// Convert HTTP response codes returned by a proxy to nsresult.
+// This function should be only used when we get a failed response to the
+// CONNECT method.
+nsresult HttpProxyResponseToErrorCode(uint32_t aStatusCode);
 
 }  // namespace net
 }  // namespace mozilla

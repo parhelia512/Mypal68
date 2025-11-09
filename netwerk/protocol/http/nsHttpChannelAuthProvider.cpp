@@ -36,8 +36,7 @@
 #include "nsIProxiedChannel.h"
 #include "nsIProxyInfo.h"
 
-namespace mozilla {
-namespace net {
+namespace mozilla::net {
 
 #define SUBRESOURCE_AUTH_DIALOG_DISALLOW_ALL 0
 #define SUBRESOURCE_AUTH_DIALOG_DISALLOW_CROSS_ORIGIN 1
@@ -482,7 +481,7 @@ nsresult nsHttpChannelAuthProvider::PrepareForAuthentication(bool proxyAuth) {
     if (NS_FAILED(rv)) {
       // delete the proxy authorization header because we weren't
       // asked to authenticate
-      rv = mAuthChannel->SetProxyCredentials(EmptyCString());
+      rv = mAuthChannel->SetProxyCredentials(""_ns);
       if (NS_FAILED(rv)) return rv;
       LOG(("  cleared proxy authorization header"));
     }
@@ -1611,5 +1610,4 @@ NS_IMPL_ISUPPORTS(nsHttpChannelAuthProvider, nsICancelable,
                   nsIHttpChannelAuthProvider, nsIAuthPromptCallback,
                   nsIHttpAuthenticatorCallback)
 
-}  // namespace net
-}  // namespace mozilla
+}  // namespace mozilla::net

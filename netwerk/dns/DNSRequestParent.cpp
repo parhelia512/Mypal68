@@ -19,6 +19,8 @@ namespace net {
 DNSRequestParent::DNSRequestParent() : mFlags(0) {}
 
 void DNSRequestParent::DoAsyncResolve(const nsACString& hostname,
+                                      const nsACString& trrServer,
+                                      uint16_t type,
                                       const OriginAttributes& originAttributes,
                                       uint32_t flags) {
   nsresult rv;
@@ -27,8 +29,17 @@ void DNSRequestParent::DoAsyncResolve(const nsACString& hostname,
   if (NS_SUCCEEDED(rv)) {
     nsCOMPtr<nsIEventTarget> main = GetMainThreadEventTarget();
     nsCOMPtr<nsICancelable> unused;
-    rv = dns->AsyncResolveNative(hostname, flags, this, main, originAttributes,
-                                 getter_AddRefs(unused));
+    if (type != nsIDNSService::RESOLVE_TYPE_DEFAULT) {
+        rv = dns->AsyncResolveByTypeNative(hostname, type, flags, this, main,
+                                           originAttributes, getter_AddRefs(unused));
+    } else if (trrServer.IsEmpty()) {
+        rv = dns->AsyncResolveNative(hostname, flags, this, main, originAttributes,
+                                     getter_AddRefs(unused));
+    } else {
+        rv = dns->AsyncResolveWithTrrServerNative(hostname, trrServer, flags, this,
+                                                  main, originAttributes,
+                                                  getter_AddRefs(unused));
+    }
   }
 
   if (NS_FAILED(rv) && CanSend()) {
@@ -37,18 +48,21 @@ void DNSRequestParent::DoAsyncResolve(const nsACString& hostname,
 }
 
 mozilla::ipc::IPCResult DNSRequestParent::RecvCancelDNSRequest(
-    const nsCString& hostName, const uint16_t& type,
-    const OriginAttributes& originAttributes, const uint32_t& flags,
-    const nsresult& reason) {
+    const nsCString& hostName, const nsCString& aTrrServer,
+    const uint16_t& type, const OriginAttributes& originAttributes,
+    const uint32_t& flags, const nsresult& reason) {
   nsresult rv;
   nsCOMPtr<nsIDNSService> dns = do_GetService(NS_DNSSERVICE_CONTRACTID, &rv);
   if (NS_SUCCEEDED(rv)) {
-    if (type == nsIDNSService::RESOLVE_TYPE_DEFAULT) {
+    if (type != nsIDNSService::RESOLVE_TYPE_DEFAULT) {
+      rv = dns->CancelAsyncResolveByTypeNative(hostName, type, flags, this,
+                                               reason, originAttributes);
+    } else if (aTrrServer.IsEmpty()) {
       rv = dns->CancelAsyncResolveNative(hostName, flags, this, reason,
                                          originAttributes);
     } else {
-      rv = dns->CancelAsyncResolveByTypeNative(hostName, type, flags, this,
-                                               reason, originAttributes);
+      rv = dns->CancelAsyncResolveWithTrrServerNative(hostName, aTrrServer, flags,
+                                                      this, reason, originAttributes);
     }
   }
   return IPC_OK();
@@ -75,13 +89,21 @@ DNSRequestParent::OnLookupComplete(nsICancelable* request, nsIDNSRecord* rec,
   if (NS_SUCCEEDED(status)) {
     MOZ_ASSERT(rec);
 
+    nsCOMPtr<nsIDNSByTypeRecord> byTypeRec = do_QueryInterface(rec);
+    if (byTypeRec) {
+      IPCTypeRecord result;
+      byTypeRec->GetResults(&result.mData);
+      Unused << SendLookupCompleted(DNSRequestResponse(result));
+      return NS_OK;
+    }
+
     nsAutoCString cname;
     if (mFlags & nsHostResolver::RES_CANON_NAME) {
       rec->GetCanonicalName(cname);
     }
 
     // Get IP addresses for hostname (use port 80 as dummy value for NetAddr)
-    NetAddrArray array;
+    nsTArray<NetAddr> array;
     NetAddr addr;
     while (NS_SUCCEEDED(rec->GetNextAddr(80, &addr))) {
       array.AppendElement(addr);
@@ -92,25 +114,6 @@ DNSRequestParent::OnLookupComplete(nsICancelable* request, nsIDNSRecord* rec,
     Unused << SendLookupCompleted(DNSRequestResponse(status));
   }
 
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-DNSRequestParent::OnLookupByTypeComplete(nsICancelable* aRequest,
-                                         nsIDNSByTypeRecord* aRes,
-                                         nsresult aStatus) {
-  if (!CanSend()) {
-    // nothing to do: child probably crashed
-    return NS_OK;
-  }
-
-  if (NS_SUCCEEDED(aStatus)) {
-    nsTArray<nsCString> rec;
-    aRes->GetRecords(rec);
-    Unused << SendLookupCompleted(DNSRequestResponse(rec));
-  } else {
-    Unused << SendLookupCompleted(DNSRequestResponse(aStatus));
-  }
   return NS_OK;
 }
 

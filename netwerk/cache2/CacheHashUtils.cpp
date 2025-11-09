@@ -7,8 +7,7 @@
 #include "mozilla/BasePrincipal.h"
 #include "plstr.h"
 
-namespace mozilla {
-namespace net {
+namespace mozilla::net {
 
 /**
  *  CacheHash::Hash(const char * key, uint32_t initval)
@@ -231,5 +230,4 @@ OriginAttrsHash GetOriginAttrsHash(const mozilla::OriginAttributes& aOA) {
   return BigEndian::readUint64(&hash);
 }
 
-}  // namespace net
-}  // namespace mozilla
+}  // namespace mozilla::net

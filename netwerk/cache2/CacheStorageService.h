@@ -12,7 +12,7 @@
 #include "nsICacheTesting.h"
 
 #include "nsClassHashtable.h"
-#include "nsDataHashtable.h"
+#include "nsTHashMap.h"
 #include "nsString.h"
 #include "nsThreadUtils.h"
 #include "nsProxyRelease.h"
@@ -100,7 +100,7 @@ class CacheStorageService final : public nsICacheStorageService,
   mozilla::Mutex& Lock() { return mLock; }
 
   // Tracks entries that may be forced valid in a pruned hashtable.
-  nsDataHashtable<nsCStringHashKey, TimeStamp> mForcedValidEntries;
+  nsTHashMap<nsCStringHashKey, TimeStamp> mForcedValidEntries;
   void ForcedValidEntriesPrune(TimeStamp& now);
 
   // Helper thread-safe interface to pass entry info, only difference from
@@ -117,7 +117,7 @@ class CacheStorageService final : public nsICacheStorageService,
 
   // Invokes OnEntryInfo for the given aEntry, synchronously.
   static void GetCacheEntryInfo(CacheEntry* aEntry,
-                                EntryInfoCallback* aVisitor);
+                                EntryInfoCallback* aCallback);
 
   nsresult GetCacheIndexEntryAttrs(CacheStorage const* aStorage,
                                    const nsACString& aURI,
@@ -197,7 +197,7 @@ class CacheStorageService final : public nsICacheStorageService,
    * thrown away when forced valid
    * See nsICacheEntry.idl for more details
    */
-  bool IsForcedValidEntry(nsACString const& aEntryKeyWithContext);
+  bool IsForcedValidEntry(nsACString const& aContextEntryKey);
 
  private:
   // These are helpers for telemetry monitoring of the memory pools.
@@ -385,7 +385,7 @@ class CacheStorageService final : public nsICacheStorageService,
   // Note: not included in the memory reporter, this is not expected to be huge
   // and also would be complicated to report since reporting happens on the main
   // thread but this table is manipulated on the management thread.
-  nsDataHashtable<nsCStringHashKey, mozilla::TimeStamp> mPurgeTimeStamps;
+  nsTHashMap<nsCStringHashKey, mozilla::TimeStamp> mPurgeTimeStamps;
 
   // nsICacheTesting
   class IOThreadSuspender : public Runnable {

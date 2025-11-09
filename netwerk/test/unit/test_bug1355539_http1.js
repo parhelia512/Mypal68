@@ -130,11 +130,11 @@ function HttpResponseListener(id, onStopCallback) {
 }
 
 HttpResponseListener.prototype = {
-  onStartRequest: function(request) {},
+  onStartRequest(request) {},
 
-  onDataAvailable: function(request, stream, off, cnt) {},
+  onDataAvailable(request, stream, off, cnt) {},
 
-  onStopRequest: function(request, status) {
+  onStopRequest(request, status) {
     log("STOP id=" + this.id);
     do_test_finished();
     if (this.stopCallback) {
