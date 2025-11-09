@@ -6,13 +6,12 @@
 #define nsMemoryReporterManager_h__
 
 #include "mozilla/Mutex.h"
-#include "nsDataHashtable.h"
+#include "nsTHashMap.h"
 #include "nsHashKeys.h"
 #include "nsIEventTarget.h"
 #include "nsIMemoryReporter.h"
 #include "nsITimer.h"
 #include "nsServiceManagerUtils.h"
-#include "nsDataHashtable.h"
 
 namespace mozilla {
 class MemoryReportingProcess;
@@ -43,10 +42,9 @@ class nsMemoryReporterManager final : public nsIMemoryReporterManager,
     return static_cast<nsMemoryReporterManager*>(imgr.get());
   }
 
-  typedef nsDataHashtable<nsRefPtrHashKey<nsIMemoryReporter>, bool>
+  typedef nsTHashMap<nsRefPtrHashKey<nsIMemoryReporter>, bool>
       StrongReportersTable;
-  typedef nsDataHashtable<nsPtrHashKey<nsIMemoryReporter>, bool>
-      WeakReportersTable;
+  typedef nsTHashMap<nsPtrHashKey<nsIMemoryReporter>, bool> WeakReportersTable;
 
   // Inter-process memory reporting proceeds as follows.
   //

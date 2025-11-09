@@ -5,10 +5,14 @@
 #ifndef nsCycleCollectionParticipant_h__
 #define nsCycleCollectionParticipant_h__
 
-#include "mozilla/MacroArgs.h"
+#include <type_traits>
+#include "js/HeapAPI.h"
+#include "js/TypeDecls.h"
 #include "mozilla/MacroForEach.h"
 #include "nsCycleCollectionNoteChild.h"
-#include "js/RootingAPI.h"
+#include "nsDebug.h"
+#include "nsID.h"
+#include "nscore.h"
 
 /**
  * Note: the following two IIDs only differ in one bit in the last byte.  This
@@ -47,11 +51,15 @@ class nsCycleCollectionISupports {
 NS_DEFINE_STATIC_IID_ACCESSOR(nsCycleCollectionISupports,
                               NS_CYCLECOLLECTIONISUPPORTS_IID)
 
+class nsCycleCollectionTraversalCallback;
+class nsISupports;
 class nsWrapperCache;
 
 namespace JS {
 template <class T>
 class Heap;
+template <typename T>
+class TenuredHeap;
 } /* namespace JS */
 
 /*
@@ -971,6 +979,72 @@ inline bool TopThreeWordsEquals(const nsID& aID, const nsID& aOther1,
  */
 inline bool LowWordEquals(const nsID& aID, const nsID& aOther) {
   return (((uint32_t*)&aID.m0)[3] == ((uint32_t*)&aOther.m0)[3]);
+}
+
+// Template magic to modify JS::Heap without including relevant headers, to
+// prevent excessive header dependency.
+template <typename T>
+inline void ImplCycleCollectionUnlink(JS::Heap<T>& aField) {
+  aField.setNull();
+}
+template <typename T>
+inline void ImplCycleCollectionUnlink(JS::Heap<T*>& aField) {
+  aField = nullptr;
+}
+
+#define NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBERS(...)                \
+  MOZ_FOR_EACH(NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK, (), \
+               (__VA_ARGS__))
+
+#define NS_IMPL_CYCLE_COLLECTION_WITH_JS_MEMBERS(class_, native_members_,   \
+                                                 js_members_)               \
+  NS_IMPL_CYCLE_COLLECTION_CLASS(class_)                                    \
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(class_)                             \
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(                                        \
+        MOZ_FOR_EACH_EXPAND_HELPER native_members_)                         \
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(MOZ_FOR_EACH_EXPAND_HELPER js_members_) \
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                                       \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(class_)                           \
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(                                      \
+        MOZ_FOR_EACH_EXPAND_HELPER native_members_)                         \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                                     \
+  NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(class_)                              \
+    NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBERS(                              \
+        MOZ_FOR_EACH_EXPAND_HELPER js_members_)                             \
+  NS_IMPL_CYCLE_COLLECTION_TRACE_END
+
+#define NS_IMPL_CYCLE_COLLECTION_INHERITED_WITH_JS_MEMBERS(                 \
+    class_, _base, native_members_, js_members_)                            \
+  NS_IMPL_CYCLE_COLLECTION_CLASS(class_)                                    \
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(class_, _base)            \
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(                                        \
+        MOZ_FOR_EACH_EXPAND_HELPER native_members_)                         \
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(MOZ_FOR_EACH_EXPAND_HELPER js_members_) \
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_END                                       \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(class_, _base)          \
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(                                      \
+        MOZ_FOR_EACH_EXPAND_HELPER native_members_)                         \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                                     \
+  NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(class_, _base)             \
+    NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBERS(                              \
+        MOZ_FOR_EACH_EXPAND_HELPER js_members_)                             \
+  NS_IMPL_CYCLE_COLLECTION_TRACE_END
+
+template <typename... Elements>
+inline void ImplCycleCollectionUnlink(std::tuple<Elements...>& aField) {
+  std::apply([](auto&&... aArgs) { (ImplCycleCollectionUnlink(aArgs), ...); },
+             aField);
+}
+template <typename... Elements>
+inline void ImplCycleCollectionTraverse(
+    nsCycleCollectionTraversalCallback& aCallback,
+    std::tuple<Elements...>& aField, const char* aName, uint32_t aFlags) {
+  aFlags |= CycleCollectionEdgeNameArrayFlag;
+  std::apply(
+      [&](auto&&... aArgs) {
+        (ImplCycleCollectionTraverse(aCallback, aArgs, aName, aFlags), ...);
+      },
+      aField);
 }
 
 #endif  // nsCycleCollectionParticipant_h__

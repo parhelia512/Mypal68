@@ -1074,8 +1074,8 @@ static void StripRundll32(nsString& aCommandString) {
   // C:\Windows\System32\rundll32.exe "path to dll", var var
   // rundll32.exe "path to dll", var var
 
-  NS_NAMED_LITERAL_STRING(rundllSegment, "rundll32.exe ");
-  NS_NAMED_LITERAL_STRING(rundllSegmentShort, "rundll32 ");
+  constexpr auto rundllSegment = u"rundll32.exe "_ns;
+  constexpr auto rundllSegmentShort = u"rundll32 "_ns;
 
   // case insensitive
   int32_t strLen = rundllSegment.Length();
@@ -1321,7 +1321,7 @@ nsresult nsLocalFile::AppendInternal(const nsString& aNode,
     // "foo..foo", "..foo", and "foo.." are not falsely detected,
     // but the invalid paths "..\", "foo\..", "foo\..\foo",
     // "..\foo", etc are.
-    NS_NAMED_LITERAL_STRING(doubleDot, "\\..");
+    constexpr auto doubleDot = u"\\.."_ns;
     nsAString::const_iterator start, end, offset;
     aNode.BeginReading(start);
     aNode.EndReading(end);
@@ -2034,15 +2034,15 @@ nsresult nsLocalFile::CopyMove(nsIFile* aParentDir, const nsAString& aNewName,
           return NS_ERROR_FAILURE;
         }
 
-        rv = file->MoveTo(target, EmptyString());
+        rv = file->MoveTo(target, u""_ns);
         if (NS_FAILED(rv)) {
           return rv;
         }
       } else {
         if (followSymlinks) {
-          rv = file->CopyToFollowingLinks(target, EmptyString());
+          rv = file->CopyToFollowingLinks(target, u""_ns);
         } else {
-          rv = file->CopyTo(target, EmptyString());
+          rv = file->CopyTo(target, u""_ns);
         }
         if (NS_FAILED(rv)) {
           return rv;
@@ -3328,7 +3328,7 @@ nsLocalFile::CopyToNative(nsIFile* aNewParentDir, const nsACString& aNewName) {
   CHECK_mWorkingPath();
 
   if (aNewName.IsEmpty()) {
-    return CopyTo(aNewParentDir, EmptyString());
+    return CopyTo(aNewParentDir, u""_ns);
   }
 
   nsAutoString tmp;
@@ -3344,7 +3344,7 @@ NS_IMETHODIMP
 nsLocalFile::CopyToFollowingLinksNative(nsIFile* aNewParentDir,
                                         const nsACString& aNewName) {
   if (aNewName.IsEmpty()) {
-    return CopyToFollowingLinks(aNewParentDir, EmptyString());
+    return CopyToFollowingLinks(aNewParentDir, u""_ns);
   }
 
   nsAutoString tmp;
@@ -3362,7 +3362,7 @@ nsLocalFile::MoveToNative(nsIFile* aNewParentDir, const nsACString& aNewName) {
   CHECK_mWorkingPath();
 
   if (aNewName.IsEmpty()) {
-    return MoveTo(aNewParentDir, EmptyString());
+    return MoveTo(aNewParentDir, u""_ns);
   }
 
   nsAutoString tmp;

@@ -14,8 +14,8 @@ function run_test() {
 
   let testObject = {
     QueryInterface: ChromeUtils.generateQI([
-      Ci.nsIScriptableOK,
-      Ci.nsIScriptableWithNotXPCOM,
+      "nsIScriptableOK",
+      "nsIScriptableWithNotXPCOM",
     ]),
 
     method1() {
@@ -34,7 +34,7 @@ function run_test() {
   };
 
   let factory = {
-    QueryInterface: ChromeUtils.generateQI([Ci.nsIFactory]),
+    QueryInterface: ChromeUtils.generateQI(["nsIFactory"]),
 
     createInstance(outer, iid) {
       if (outer) {

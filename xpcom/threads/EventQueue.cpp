@@ -3,6 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/EventQueue.h"
+
+#include "GeckoProfiler.h"
 #include "nsIRunnable.h"
 
 using namespace mozilla;

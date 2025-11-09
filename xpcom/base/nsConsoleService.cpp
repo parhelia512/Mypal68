@@ -35,11 +35,6 @@
 #  include <windows.h>
 #endif
 
-#ifdef MOZ_TASK_TRACER
-#  include "GeckoTaskTracer.h"
-using namespace mozilla::tasktracer;
-#endif
-
 using namespace mozilla;
 
 NS_IMPL_ADDREF(nsConsoleService)
@@ -290,17 +285,6 @@ nsresult nsConsoleService::LogMessageWithMode(
       OutputDebugStringW(msg.get());
     }
 #endif
-#ifdef MOZ_TASK_TRACER
-    if (IsStartLogging()) {
-      nsCString msg;
-      aMessage->ToString(msg);
-      int prefixPos = msg.Find(GetJSLabelPrefix());
-      if (prefixPos >= 0) {
-        nsDependentCSubstring submsg(msg, prefixPos);
-        AddLabel("%s", submsg.BeginReading());
-      }
-    }
-#endif
 
     if (gLoggingBuffered) {
       MessageElement* e = new MessageElement(aMessage);
@@ -408,14 +392,17 @@ nsConsoleService::RegisterListener(nsIConsoleListener* aListener) {
   }
 
   nsCOMPtr<nsISupports> canonical = do_QueryInterface(aListener);
+  MOZ_ASSERT(canonical);
 
   MutexAutoLock lock(mLock);
-  if (mListeners.GetWeak(canonical)) {
-    // Reregistering a listener isn't good
-    return NS_ERROR_FAILURE;
-  }
-  mListeners.Put(canonical, aListener);
-  return NS_OK;
+  return mListeners.WithEntryHandle(canonical, [&](auto&& entry) {
+    if (entry) {
+      // Reregistering a listener isn't good
+      return NS_ERROR_FAILURE;
+    }
+    entry.Insert(aListener);
+    return NS_OK;
+  });
 }
 
 NS_IMETHODIMP
@@ -429,12 +416,10 @@ nsConsoleService::UnregisterListener(nsIConsoleListener* aListener) {
 
   MutexAutoLock lock(mLock);
 
-  if (!mListeners.GetWeak(canonical)) {
-    // Unregistering a listener that was never registered?
-    return NS_ERROR_FAILURE;
-  }
-  mListeners.Remove(canonical);
-  return NS_OK;
+  return mListeners.Remove(canonical)
+             ? NS_OK
+             // Unregistering a listener that was never registered?
+             : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP

@@ -247,7 +247,7 @@ class BloatEntry {
 
   bool PrintDumpHeader(FILE* aOut, const char* aMsg) {
     fprintf(aOut, "\n== BloatView: %s, %s process %d\n", aMsg,
-            XRE_GeckoProcessTypeToString(XRE_GetProcessType()), getpid());
+            XRE_GetProcessTypeString(), getpid());
     if (gLogLeaksOnly && !mStats.HaveLeaks()) {
       return false;
     }
@@ -290,17 +290,21 @@ class BloatEntry {
   nsTraceRefcntStats mStats;
 };
 
-static void RecreateBloatView() { gBloatView = new BloatHash(256); }
+static void EnsureBloatView() {
+  if (!gBloatView) {
+    gBloatView = new BloatHash(256);
+  }
+}
 
 static BloatEntry* GetBloatEntry(const char* aTypeName,
                                  uint32_t aInstanceSize) {
-  if (!gBloatView) {
-    RecreateBloatView();
-  }
+  EnsureBloatView();
   BloatEntry* entry = gBloatView->Get(aTypeName);
   if (!entry && aInstanceSize > 0) {
-    entry = new BloatEntry(aTypeName, aInstanceSize);
-    gBloatView->Put(aTypeName, entry);
+    entry = gBloatView
+                ->InsertOrUpdate(
+                    aTypeName, MakeUnique<BloatEntry>(aTypeName, aInstanceSize))
+                .get();
   } else {
     MOZ_ASSERT(
         aInstanceSize == 0 || entry->GetClassSize() == aInstanceSize,
@@ -455,7 +459,7 @@ static intptr_t GetSerialNumber(void* aPtr, bool aCreate) {
           "it.");
     }
 
-    auto& record = entry.Insert(new SerialNumberRecord());
+    auto& record = entry.Insert(MakeUnique<SerialNumberRecord>());
     WalkTheStackSavingLocations(record->allocationStack);
     if (gLogJSStacks) {
       record->SaveJSStack();
@@ -473,7 +477,7 @@ static bool LogThisObj(intptr_t aSerialNumber) {
 using EnvCharType = mozilla::filesystem::Path::value_type;
 
 static bool InitLog(const EnvCharType* aEnvVar, const char* aMsg,
-                    FILE** aResult) {
+                    FILE** aResult, const char* aProcType) {
 #ifdef XP_WIN
   // This is gross, I know.
   const wchar_t* envvar = reinterpret_cast<const wchar_t*>(aEnvVar);
@@ -505,9 +509,7 @@ static bool InitLog(const EnvCharType* aEnvVar, const char* aMsg,
           fname.Cut(fname.Length() - 4, 4);
         }
         fname.Append('_');
-        const char* processType =
-            XRE_GeckoProcessTypeToString(XRE_GetProcessType());
-        fname.AppendASCII(processType);
+        fname.AppendASCII(aProcType);
         fname.AppendLiteral("_pid");
         fname.AppendInt((uint32_t)getpid());
         if (hasLogExtension) {
@@ -552,41 +554,35 @@ static void maybeUnregisterAndCloseFile(FILE*& aFile) {
   aFile = nullptr;
 }
 
-static void InitTraceLog() {
+static void DoInitTraceLog(const char* aProcType) {
 #ifdef XP_WIN
 #  define ENVVAR(x) u"" x
 #else
 #  define ENVVAR(x) x
 #endif
 
-  if (gInitialized) {
-    return;
-  }
-  gInitialized = true;
-
   bool defined =
-      InitLog(ENVVAR("XPCOM_MEM_BLOAT_LOG"), "bloat/leaks", &gBloatLog);
+    InitLog(ENVVAR("XPCOM_MEM_BLOAT_LOG"), "bloat/leaks", &gBloatLog, aProcType);
   if (!defined) {
-    gLogLeaksOnly = InitLog(ENVVAR("XPCOM_MEM_LEAK_LOG"), "leaks", &gBloatLog);
+    gLogLeaksOnly = InitLog(ENVVAR("XPCOM_MEM_LEAK_LOG"), "leaks", &gBloatLog, aProcType);
   }
   if (defined || gLogLeaksOnly) {
-    RecreateBloatView();
-    if (!gBloatView) {
-      NS_WARNING("out of memory");
-      maybeUnregisterAndCloseFile(gBloatLog);
-      gLogLeaksOnly = false;
-    }
+    // Use the same bloat view, if there is one, to keep it consistent
+    // between the fork server and content processes.
+    EnsureBloatView();
+  } else if (gBloatView) {
+    nsTraceRefcnt::ResetStatistics();
   }
 
-  InitLog(ENVVAR("XPCOM_MEM_REFCNT_LOG"), "refcounts", &gRefcntsLog);
+  InitLog(ENVVAR("XPCOM_MEM_REFCNT_LOG"), "refcounts", &gRefcntsLog, aProcType);
 
-  InitLog(ENVVAR("XPCOM_MEM_ALLOC_LOG"), "new/delete", &gAllocLog);
+  InitLog(ENVVAR("XPCOM_MEM_ALLOC_LOG"), "new/delete", &gAllocLog, aProcType);
 
   const char* classes = getenv("XPCOM_MEM_LOG_CLASSES");
 
 #ifdef HAVE_CPP_DYNAMIC_CAST_TO_VOID_PTR
   if (classes) {
-    InitLog(ENVVAR("XPCOM_MEM_COMPTR_LOG"), "nsCOMPtr", &gCOMPtrLog);
+    InitLog(ENVVAR("XPCOM_MEM_COMPTR_LOG"), "nsCOMPtr", &gCOMPtrLog, aProcType);
   } else {
     if (getenv("XPCOM_MEM_COMPTR_LOG")) {
       fprintf(stdout,
@@ -608,7 +604,13 @@ static void InitTraceLog() {
   if (classes) {
     // if XPCOM_MEM_LOG_CLASSES was set to some value, the value is interpreted
     // as a list of class names to track
-    gTypesToLog = new CharPtrSet(256);
+    //
+    // Use the same |gTypesToLog| and |gSerialNumbers| to keep them
+    // consistent through the fork server and content processes.
+    // Without this, counters will be incorrect.
+    if (!gTypesToLog) {
+      gTypesToLog = new CharPtrSet(256);
+    }
 
     fprintf(stdout,
             "### XPCOM_MEM_LOG_CLASSES defined -- "
@@ -619,7 +621,9 @@ static void InitTraceLog() {
       if (cm) {
         *cm = '\0';
       }
-      gTypesToLog->PutEntry(cp);
+      if (!gTypesToLog->Contains(cp)) {
+        gTypesToLog->PutEntry(cp);
+      }
       fprintf(stdout, "%s ", cp);
       if (!cm) {
         break;
@@ -629,7 +633,12 @@ static void InitTraceLog() {
     }
     fprintf(stdout, "\n");
 
-    gSerialNumbers = new SerialHash(256);
+    if (!gSerialNumbers) {
+      gSerialNumbers = new SerialHash(256);
+    }
+  } else {
+    gTypesToLog = nullptr;
+    gSerialNumbers = nullptr;
   }
 
   const char* objects = getenv("XPCOM_MEM_LOG_OBJECTS");
@@ -691,6 +700,15 @@ static void InitTraceLog() {
   if (gRefcntsLog || gAllocLog || gCOMPtrLog) {
     gLogging = FullLogging;
   }
+}
+
+static void InitTraceLog() {
+  if (gInitialized) {
+    return;
+  }
+  gInitialized = true;
+
+  DoInitTraceLog(XRE_GetProcessTypeString());
 }
 
 extern "C" {
@@ -820,8 +838,7 @@ static void LogDMDFile() {
   }
 
   const char* logProcessEnv = PR_GetEnv("MOZ_DMD_LOG_PROCESS");
-  if (logProcessEnv && !!strcmp(logProcessEnv, XRE_GeckoProcessTypeToString(
-                                                   XRE_GetProcessType()))) {
+  if (logProcessEnv && !!strcmp(logProcessEnv, XRE_GetProcessTypeString())) {
     return;
   }
 
@@ -1133,16 +1150,26 @@ NS_LogCOMPtrRelease(void* aCOMPtr, nsISupports* aObject) {
 #endif  // HAVE_CPP_DYNAMIC_CAST_TO_VOID_PTR
 }
 
-void nsTraceRefcnt::Shutdown() {
+static void ClearLogs(bool aKeepCounters) {
   gCodeAddressService = nullptr;
-  gBloatView = nullptr;
-  gTypesToLog = nullptr;
+  // These counters from the fork server process will be preserved
+  // for the content processes to keep them consistent.
+  if (!aKeepCounters) {
+    gBloatView = nullptr;
+    gTypesToLog = nullptr;
+    gSerialNumbers = nullptr;
+  }
   gObjectsToLog = nullptr;
-  gSerialNumbers = nullptr;
+  gLogJSStacks = false;
+  gLogLeaksOnly = false;
   maybeUnregisterAndCloseFile(gBloatLog);
   maybeUnregisterAndCloseFile(gRefcntsLog);
   maybeUnregisterAndCloseFile(gAllocLog);
   maybeUnregisterAndCloseFile(gCOMPtrLog);
+}
+
+void nsTraceRefcnt::Shutdown() {
+  ClearLogs(false);
 }
 
 void nsTraceRefcnt::SetActivityIsLegal(bool aLegal) {

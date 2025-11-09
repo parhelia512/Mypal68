@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "nsASCIIMask.h"
+#include "nsCharSeparatedTokenizer.h"
+#include "nsPrintfCString.h"
 #include "nsString.h"
 #include "nsStringBuffer.h"
 #include "nsReadableUtils.h"
@@ -579,7 +581,7 @@ TEST_F(Strings, assign_c) {
 }
 
 TEST_F(Strings, test1) {
-  NS_NAMED_LITERAL_STRING(empty, "");
+  constexpr auto empty = u""_ns;
   const nsAString& aStr = empty;
 
   nsAutoString buf(aStr);
@@ -1082,6 +1084,14 @@ TEST_F(Strings, appendint64) {
   str.Truncate();
   str.AppendInt(maxint_plus1, 16);
   EXPECT_TRUE(str.Equals(maxint_plus1_expected_x));
+}
+
+TEST_F(Strings, inttotstring) {
+  EXPECT_EQ("42"_ns, IntToCString(42));
+  EXPECT_EQ(u"42"_ns, IntToString(42));
+
+  EXPECT_EQ("2a"_ns, IntToCString(42, 16));
+  EXPECT_EQ(u"2a"_ns, IntToString(42, 16));
 }
 
 TEST_F(Strings, appendfloat) {
@@ -2006,6 +2016,12 @@ TEST_F(Strings, ConvertToSpan) {
   // from non-const string
   {
     auto span = Span{string};
+    static_assert(std::is_same_v<decltype(span), Span<const char16_t>>);
+  }
+
+  // get mutable data
+  {
+    auto span = string.GetMutableData();
     static_assert(std::is_same_v<decltype(span), Span<char16_t>>);
   }
 
@@ -2022,24 +2038,100 @@ TEST_F(Strings, ConvertToSpan) {
   // from non-const string
   {
     auto span = Span{cstring};
+    static_assert(std::is_same_v<decltype(span), Span<const char>>);
+  }
+
+  // get mutable data
+  {
+    auto span = cstring.GetMutableData();
     static_assert(std::is_same_v<decltype(span), Span<char>>);
   }
 }
 
-// Macros for reducing verbosity of printf tests.
-#define create_printf_strings(format, ...)              \
-  nsCString appendPrintfString;                         \
-  appendPrintfString.AppendPrintf(format, __VA_ARGS__); \
-  const nsCString appendVprintfString(                  \
-      getAppendVprintfString(format, __VA_ARGS__));
+TEST_F(Strings, TokenizedRangeEmpty) {
+  // 8-bit strings
+  {
+    for (const auto& token : nsCCharSeparatedTokenizer(""_ns, ',').ToRange()) {
+      (void)token;
+      ADD_FAILURE();
+    }
+  }
 
-#define verify_printf_strings(expected)                                \
-  EXPECT_TRUE(appendPrintfString.EqualsASCII(expected))                \
-      << "appendPrintfString != expected:" << appendPrintfString.get() \
-      << " != " << (expected);                                         \
-  EXPECT_TRUE(appendPrintfString.Equals(appendVprintfString))          \
-      << "appendPrintfString != appendVprintfString:"                  \
-      << appendPrintfString.get() << " != " << appendVprintfString;
+  // 16-bit strings
+  {
+    for (const auto& token : nsCharSeparatedTokenizer(u""_ns, ',').ToRange()) {
+      (void)token;
+      ADD_FAILURE();
+    }
+  }
+}
+
+TEST_F(Strings, TokenizedRangeWhitespaceOnly) {
+  // 8-bit strings
+  {
+    for (const auto& token : nsCCharSeparatedTokenizer(" "_ns, ',').ToRange()) {
+      (void)token;
+      ADD_FAILURE();
+    }
+  }
+
+  // 16-bit strings
+  {
+    for (const auto& token : nsCharSeparatedTokenizer(u" "_ns, ',').ToRange()) {
+      (void)token;
+      ADD_FAILURE();
+    }
+  }
+}
+
+TEST_F(Strings, TokenizedRangeNonEmpty) {
+  // 8-bit strings
+  {
+    nsTArray<nsCString> res;
+    for (const auto& token :
+         nsCCharSeparatedTokenizer("foo,bar"_ns, ',').ToRange()) {
+      res.EmplaceBack(token);
+    }
+
+    EXPECT_EQ(res, (nsTArray<nsCString>{"foo"_ns, "bar"_ns}));
+  }
+
+  // 16-bit strings
+  {
+    nsTArray<nsString> res;
+    for (const auto& token :
+         nsCharSeparatedTokenizer(u"foo,bar"_ns, ',').ToRange()) {
+      res.EmplaceBack(token);
+    }
+
+    EXPECT_EQ(res, (nsTArray<nsString>{u"foo"_ns, u"bar"_ns}));
+  }
+}
+
+// Macros for reducing verbosity of printf tests.
+#define create_printf_strings(format, ...)                 \
+  nsCString appendPrintfString;                            \
+  appendPrintfString.AppendPrintf(format, __VA_ARGS__);    \
+  const nsCString appendVprintfString(                     \
+      getAppendVprintfString(format, __VA_ARGS__));        \
+  const nsPrintfCString printfString(format, __VA_ARGS__); \
+  const nsVprintfCString vprintfString{getVprintfCString(format, __VA_ARGS__)};
+
+// We don't check every possible combination as we assume equality is
+// transitive.
+#define verify_printf_strings(expected)                                     \
+  EXPECT_TRUE(appendPrintfString.EqualsASCII(expected))                     \
+      << "appendPrintfString != expected:" << appendPrintfString.get()      \
+      << " != " << (expected);                                              \
+  EXPECT_TRUE(appendPrintfString.Equals(appendVprintfString))               \
+      << "appendPrintfString != appendVprintfString:"                       \
+      << appendPrintfString.get() << " != " << appendVprintfString;         \
+  EXPECT_TRUE(appendPrintfString.Equals(printfString))                      \
+      << "appendPrintfString != printfString:" << appendPrintfString.get()  \
+      << " != " << printfString;                                            \
+  EXPECT_TRUE(appendPrintfString.Equals(vprintfString))                     \
+      << "appendPrintfString != vprintfString:" << appendPrintfString.get() \
+      << " != " << vprintfString;
 
 TEST_F(Strings, printf) {
   auto getAppendVprintfString = [](const char* aFormat, ...) {
@@ -2050,6 +2142,15 @@ TEST_F(Strings, printf) {
     cString.AppendVprintf(aFormat, ap);
     va_end(ap);
     return cString;
+  };
+
+  auto getVprintfCString = [](const char* aFormat, ...) {
+    // Helper to get a nsVprintfCString.
+    va_list ap;
+    va_start(ap, aFormat);
+    const nsVprintfCString vprintfString(aFormat, ap);
+    va_end(ap);
+    return vprintfString;
   };
 
   {
@@ -2614,7 +2715,7 @@ CONVERSION_BENCH(PerfUTF8toUTF16VIThousand, CopyUTF8toUTF16, mViThousandUtf8,
 // Tests for usability of nsTLiteralString in constant expressions.
 static_assert(u""_ns.IsEmpty());
 
-constexpr auto testStringA = NS_LITERAL_STRING("a");
+constexpr auto testStringA = u"a"_ns;
 static_assert(!testStringA.IsEmpty());
 static_assert(!testStringA.IsVoid());
 static_assert(testStringA.IsLiteral());

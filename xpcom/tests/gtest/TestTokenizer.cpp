@@ -972,7 +972,7 @@ TEST(Tokenizer, Incremental)
         return NS_OK;
       });
 
-  NS_NAMED_LITERAL_CSTRING(input, "test1,test2,,,test3");
+  constexpr auto input = "test1,test2,,,test3"_ns;
   auto cur = input.BeginReading();
   auto end = input.EndReading();
   for (; cur < end; ++cur) {
@@ -1025,7 +1025,7 @@ TEST(Tokenizer, IncrementalRollback)
         return NS_OK;
       });
 
-  NS_NAMED_LITERAL_CSTRING(input, "test1,test2,,,test3");
+  constexpr auto input = "test1,test2,,,test3"_ns;
   auto cur = input.BeginReading();
   auto end = input.EndReading();
   for (; cur < end; ++cur) {
@@ -1076,7 +1076,7 @@ TEST(Tokenizer, IncrementalNeedMoreInput)
         return NS_OK;
       });
 
-  NS_NAMED_LITERAL_CSTRING(input, "a bb,c");
+  constexpr auto input = "a bb,c"_ns;
   auto cur = input.BeginReading();
   auto end = input.EndReading();
 
@@ -1175,7 +1175,7 @@ TEST(Tokenizer, IncrementalCustomRaw)
   custom = i.AddCustomToken("test2", Tokenizer::CASE_SENSITIVE);
   i.SetTokenizingMode(Tokenizer::Mode::CUSTOM_ONLY);
 
-  NS_NAMED_LITERAL_CSTRING(input, "test1,test2!,,test3test2tes");
+  constexpr auto input = "test1,test2!,,test3test2tes"_ns;
   auto cur = input.BeginReading();
   auto end = input.EndReading();
   for (; cur < end; ++cur) {
@@ -1213,7 +1213,7 @@ TEST(Tokenizer, IncrementalCustomRemove)
 
   custom = i.AddCustomToken("custom1", Tokenizer::CASE_SENSITIVE);
 
-  NS_NAMED_LITERAL_CSTRING(input, "custom1custom1");
+  constexpr auto input = "custom1custom1"_ns;
   i.FeedInput(input);
   EXPECT_TRUE(test == 1);
   i.FinishInput();

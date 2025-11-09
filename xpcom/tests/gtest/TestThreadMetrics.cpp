@@ -123,8 +123,8 @@ class ThreadMetrics : public ::testing::Test {
   virtual void SetUp() {
     // building the TabGroup/DocGroup structure
     RefPtr<dom::TabGroup> tabGroup = new dom::TabGroup(false);
-    mDocGroup = tabGroup->AddDocument(NS_LITERAL_CSTRING("key"), nullptr);
-    mDocGroup2 = tabGroup->AddDocument(NS_LITERAL_CSTRING("key2"), nullptr);
+    mDocGroup = tabGroup->AddDocument("key"_ns, nullptr);
+    mDocGroup2 = tabGroup->AddDocument("key2"_ns, nullptr);
     mSchedulerGroup = new MSchedulerGroup(mDocGroup);
     mCounter = mDocGroup->GetPerformanceCounter();
     mCounter2 = mDocGroup2->GetPerformanceCounter();

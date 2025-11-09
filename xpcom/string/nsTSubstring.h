@@ -13,6 +13,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/IntegerTypeTraits.h"
 #include "mozilla/Result.h"
@@ -923,13 +924,27 @@ class nsTSubstring : public mozilla::detail::nsTStringRepr<T> {
   }
 #endif
 
+  mozilla::Span<char_type> GetMutableData(size_type aNewLen = size_type(-1)) {
+    if (!EnsureMutable(aNewLen)) {
+      AllocFailed(aNewLen == size_type(-1) ? base_string_type::mLength
+                                           : aNewLen);
+    }
+
+    return mozilla::Span{base_string_type::mData, base_string_type::mLength};
+  }
+
+  mozilla::Maybe<mozilla::Span<char_type>> GetMutableData(size_type aNewLen,
+                                                          const fallible_t&) {
+    if (!EnsureMutable(aNewLen)) {
+      return mozilla::Nothing();
+    }
+    return Some(
+        mozilla::Span{base_string_type::mData, base_string_type::mLength});
+  }
+
   /**
    * Span integration
    */
-
-  operator mozilla::Span<char_type>() {
-    return mozilla::Span{BeginWriting(), base_string_type::Length()};
-  }
 
   operator mozilla::Span<const char_type>() const {
     return mozilla::Span{base_string_type::BeginReading(),
@@ -961,12 +976,6 @@ class nsTSubstring : public mozilla::detail::nsTStringRepr<T> {
 
   void AppendASCII(mozilla::Span<const char> aData) {
     AppendASCII(aData.Elements(), aData.Length());
-  }
-
-  template <typename Q = T, typename EnableIfChar = mozilla::CharOnlyT<Q>>
-  operator mozilla::Span<uint8_t>() {
-    return mozilla::Span{reinterpret_cast<uint8_t*>(BeginWriting()),
-                         base_string_type::Length()};
   }
 
   template <typename Q = T, typename EnableIfChar = mozilla::CharOnlyT<Q>>
@@ -1369,82 +1378,14 @@ static_assert(sizeof(nsTSubstring<char>) ==
               "Don't add new data fields to nsTSubstring_CharT. "
               "Add to nsTStringRepr<T> instead.");
 
-// You should not need to instantiate this class directly.
-// Use nsTSubstring::Split instead.
-template <typename T>
-class nsTSubstringSplitter {
-  typedef typename nsTSubstring<T>::size_type size_type;
-  typedef typename nsTSubstring<T>::char_type char_type;
-
-  class nsTSubstringSplit_Iter {
-   public:
-    using value_type = const nsTDependentSubstring<T>;
-    using pointer = value_type*;
-    using reference = value_type&;
-    using iterator_category = std::forward_iterator_tag;
-    using difference_type = ptrdiff_t;
-
-    nsTSubstringSplit_Iter() : mObj(nullptr), mPos(0) {}
-
-    nsTSubstringSplit_Iter(const nsTSubstringSplitter<T>* aObj, size_type aPos)
-        : mObj(aObj), mPos(aPos) {}
-
-    bool operator==(const nsTSubstringSplit_Iter& other) const {
-      MOZ_ASSERT(mObj == other.mObj);
-      return mPos == other.mPos;
-    }
-    bool operator!=(const nsTSubstringSplit_Iter& other) const {
-      return !(*this == other);
-    }
-
-    const nsTDependentSubstring<T>& operator*() const;
-    const nsTDependentSubstring<T>* operator->() const;
-
-    const nsTSubstringSplit_Iter& operator++() {
-      ++mPos;
-      return *this;
-    }
-
-   private:
-    const nsTSubstringSplitter<T>* mObj;
-    size_type mPos;
-  };
-
- private:
-  const nsTSubstring<T>* const mStr;
-  mozilla::UniquePtr<nsTDependentSubstring<T>[]> mArray;
-  size_type mArraySize;
-  const char_type mDelim;
-
- public:
-  nsTSubstringSplitter(const nsTSubstring<T>* aStr, char_type aDelim);
-
-  nsTSubstringSplit_Iter begin() const {
-    return nsTSubstringSplit_Iter(this, 0);
-  }
-
-  nsTSubstringSplit_Iter end() const {
-    return nsTSubstringSplit_Iter(this, mArraySize);
-  }
-
-  const nsTDependentSubstring<T>& Get(const size_type index) const {
-    MOZ_ASSERT(index < mArraySize);
-    return mArray[index];
-  }
-};
-
+#include "nsCharSeparatedTokenizer.h"
 #include "nsTDependentSubstring.h"
-
-extern template class nsTSubstringSplitter<char>;
-extern template class nsTSubstringSplitter<char16_t>;
 
 /**
  * Span integration
  */
 namespace mozilla {
-Span(nsTSubstring<char>&)->Span<char>;
 Span(const nsTSubstring<char>&)->Span<const char>;
-Span(nsTSubstring<char16_t>&)->Span<char16_t>;
 Span(const nsTSubstring<char16_t>&)->Span<const char16_t>;
 
 }  // namespace mozilla

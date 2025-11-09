@@ -62,7 +62,6 @@ enum class ShutdownPhase {
   ShutdownPostLastCycleCollection,
   ShutdownPhase_Length,  // never pass this value
   First = WillShutdown,  // for iteration
-  Last = ShutdownFinal
 };
 
 namespace ClearOnShutdown_Internal {

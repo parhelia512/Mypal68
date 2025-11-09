@@ -15,7 +15,6 @@
 
 namespace mozilla {
 
-class TaskQueue;
 class TaskDispatcher;
 
 /*

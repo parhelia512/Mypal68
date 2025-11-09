@@ -182,14 +182,10 @@ already_AddRefed<nsISerialEventTarget>
 BackgroundEventTarget::CreateBackgroundTaskQueue(const char* aName) {
   AutoLock lock(mMutex);
 
-  RefPtr<TaskQueue> queue = new TaskQueue(do_AddRef(this), aName,
-                                          /*aSupportsTailDispatch=*/false,
-                                          /*aRetainFlags=*/true);
-  nsCOMPtr<nsISerialEventTarget> target(queue->WrapAsEventTarget());
+  RefPtr<TaskQueue> queue = new TaskQueue(do_AddRef(this), aName);
+  mTaskQueues.AppendElement(queue);
 
-  mTaskQueues.AppendElement(queue.forget());
-
-  return target.forget();
+  return queue.forget();
 }
 
 extern "C" {

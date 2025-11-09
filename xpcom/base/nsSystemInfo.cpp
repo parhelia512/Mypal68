@@ -98,149 +98,6 @@ static void SimpleParseKeyValuePairs(
 
 #if defined(XP_WIN)
 namespace {
-nsresult GetHDDInfo(const char* aSpecialDirName, nsAutoCString& aModel,
-                    nsAutoCString& aRevision, nsAutoCString& aType) {
-  aModel.Truncate();
-  aRevision.Truncate();
-  aType.Truncate();
-
-  nsCOMPtr<nsIFile> profDir;
-  nsresult rv =
-      NS_GetSpecialDirectory(aSpecialDirName, getter_AddRefs(profDir));
-  NS_ENSURE_SUCCESS(rv, rv);
-  nsAutoString profDirPath;
-  rv = profDir->GetPath(profDirPath);
-  NS_ENSURE_SUCCESS(rv, rv);
-  wchar_t volumeMountPoint[MAX_PATH] = {L'\\', L'\\', L'.', L'\\'};
-  const size_t PREFIX_LEN = 4;
-  if (!::GetVolumePathNameW(
-          profDirPath.get(), volumeMountPoint + PREFIX_LEN,
-          mozilla::ArrayLength(volumeMountPoint) - PREFIX_LEN)) {
-    return NS_ERROR_UNEXPECTED;
-  }
-  size_t volumeMountPointLen = wcslen(volumeMountPoint);
-  // Since we would like to open a drive and not a directory, we need to
-  // remove any trailing backslash. A drive handle is valid for
-  // DeviceIoControl calls, a directory handle is not.
-  if (volumeMountPoint[volumeMountPointLen - 1] == L'\\') {
-    volumeMountPoint[volumeMountPointLen - 1] = L'\0';
-  }
-  ScopedHandle handle(::CreateFileW(volumeMountPoint, 0,
-                                    FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                                    OPEN_EXISTING, 0, nullptr));
-  if (!handle.IsValid()) {
-    return NS_ERROR_UNEXPECTED;
-  }
-  STORAGE_PROPERTY_QUERY queryParameters = {StorageDeviceProperty,
-                                            PropertyStandardQuery};
-  STORAGE_DEVICE_DESCRIPTOR outputHeader = {sizeof(STORAGE_DEVICE_DESCRIPTOR)};
-  DWORD bytesRead = 0;
-  if (!::DeviceIoControl(handle, IOCTL_STORAGE_QUERY_PROPERTY, &queryParameters,
-                         sizeof(queryParameters), &outputHeader,
-                         sizeof(outputHeader), &bytesRead, nullptr)) {
-    return NS_ERROR_FAILURE;
-  }
-  PSTORAGE_DEVICE_DESCRIPTOR deviceOutput =
-      (PSTORAGE_DEVICE_DESCRIPTOR)malloc(outputHeader.Size);
-  if (!::DeviceIoControl(handle, IOCTL_STORAGE_QUERY_PROPERTY, &queryParameters,
-                         sizeof(queryParameters), deviceOutput,
-                         outputHeader.Size, &bytesRead, nullptr)) {
-    free(deviceOutput);
-    return NS_ERROR_FAILURE;
-  }
-
-  queryParameters.PropertyId = StorageDeviceTrimProperty;
-  bytesRead = 0;
-  bool isSSD = false;
-  DEVICE_TRIM_DESCRIPTOR trimDescriptor = {sizeof(DEVICE_TRIM_DESCRIPTOR)};
-  if (::DeviceIoControl(handle, IOCTL_STORAGE_QUERY_PROPERTY, &queryParameters,
-                        sizeof(queryParameters), &trimDescriptor,
-                        sizeof(trimDescriptor), &bytesRead, nullptr)) {
-    if (trimDescriptor.TrimEnabled) {
-      isSSD = true;
-    }
-  }
-
-  if (isSSD) {
-    // Get Seek Penalty
-    queryParameters.PropertyId = StorageDeviceSeekPenaltyProperty;
-    bytesRead = 0;
-    DEVICE_SEEK_PENALTY_DESCRIPTOR seekPenaltyDescriptor = {
-        sizeof(DEVICE_SEEK_PENALTY_DESCRIPTOR)};
-    if (::DeviceIoControl(handle, IOCTL_STORAGE_QUERY_PROPERTY,
-                          &queryParameters, sizeof(queryParameters),
-                          &seekPenaltyDescriptor, sizeof(seekPenaltyDescriptor),
-                          &bytesRead, nullptr)) {
-      // It is possible that the disk has TrimEnabled, but also
-      // IncursSeekPenalty; In this case, this is an HDD
-      if (seekPenaltyDescriptor.IncursSeekPenalty) {
-        isSSD = false;
-      }
-    }
-  }
-
-  // Some HDDs are including product ID info in the vendor field. Since PNP
-  // IDs include vendor info and product ID concatenated together, we'll do
-  // that here and interpret the result as a unique ID for the HDD model.
-  if (deviceOutput->VendorIdOffset) {
-    aModel =
-        reinterpret_cast<char*>(deviceOutput) + deviceOutput->VendorIdOffset;
-  }
-  if (deviceOutput->ProductIdOffset) {
-    aModel +=
-        reinterpret_cast<char*>(deviceOutput) + deviceOutput->ProductIdOffset;
-  }
-  aModel.CompressWhitespace();
-  if (deviceOutput->ProductRevisionOffset) {
-    aRevision = reinterpret_cast<char*>(deviceOutput) +
-                deviceOutput->ProductRevisionOffset;
-    aRevision.CompressWhitespace();
-  }
-  if (isSSD) {
-    aType = "SSD";
-  } else {
-    aType = "HDD";
-  }
-  free(deviceOutput);
-  return NS_OK;
-}
-
-nsresult GetInstallYear(uint32_t& aYear) {
-  HKEY hKey;
-  LONG status = RegOpenKeyExW(
-      HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0,
-      KEY_READ | KEY_WOW64_64KEY, &hKey);
-
-  if (status != ERROR_SUCCESS) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  nsAutoRegKey key(hKey);
-
-  DWORD type = 0;
-  time_t raw_time = 0;
-  DWORD time_size = sizeof(time_t);
-
-  status = RegQueryValueExW(hKey, L"InstallDate", nullptr, &type,
-                            (LPBYTE)&raw_time, &time_size);
-
-  if (status != ERROR_SUCCESS) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  if (type != REG_DWORD) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  tm time;
-  if (localtime_s(&time, &raw_time) != 0) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  aYear = 1900UL + time.tm_year;
-  return NS_OK;
-}
-
 nsresult GetCountryCode(nsAString& aCountryCode) {
   GEOID geoid = GetUserGeoID(GEOCLASS_NATION);
   if (geoid == GEOID_NOT_AVAILABLE) {
@@ -317,64 +174,6 @@ static const struct PropItems {
     {"hasARMv7", mozilla::supports_armv7},
     {"hasNEON", mozilla::supports_neon}};
 
-#ifdef XP_WIN
-// Lifted from media/webrtc/trunk/webrtc/base/systeminfo.cc,
-// so keeping the _ instead of switching to camel case for now.
-typedef BOOL(WINAPI* LPFN_GLPI)(PSYSTEM_LOGICAL_PROCESSOR_INFORMATION, PDWORD);
-static void GetProcessorInformation(int* physical_cpus, int* cache_size_L2,
-                                    int* cache_size_L3) {
-  MOZ_ASSERT(physical_cpus && cache_size_L2 && cache_size_L3);
-
-  *physical_cpus = 0;
-  *cache_size_L2 = 0;  // This will be in kbytes
-  *cache_size_L3 = 0;  // This will be in kbytes
-
-  // GetLogicalProcessorInformation() is available on Windows XP SP3 and beyond.
-  LPFN_GLPI glpi = reinterpret_cast<LPFN_GLPI>(GetProcAddress(
-      GetModuleHandle(L"kernel32"), "GetLogicalProcessorInformation"));
-  if (nullptr == glpi) {
-    return;
-  }
-  // Determine buffer size, allocate and get processor information.
-  // Size can change between calls (unlikely), so a loop is done.
-  SYSTEM_LOGICAL_PROCESSOR_INFORMATION info_buffer[32];
-  SYSTEM_LOGICAL_PROCESSOR_INFORMATION* infos = &info_buffer[0];
-  DWORD return_length = sizeof(info_buffer);
-  while (!glpi(infos, &return_length)) {
-    if (GetLastError() == ERROR_INSUFFICIENT_BUFFER &&
-        infos == &info_buffer[0]) {
-      infos = new SYSTEM_LOGICAL_PROCESSOR_INFORMATION
-          [return_length / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION)];
-    } else {
-      return;
-    }
-  }
-
-  for (size_t i = 0;
-       i < return_length / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION); ++i) {
-    if (infos[i].Relationship == RelationProcessorCore) {
-      ++*physical_cpus;
-    } else if (infos[i].Relationship == RelationCache) {
-      // Only care about L2 and L3 cache
-      switch (infos[i].Cache.Level) {
-        case 2:
-          *cache_size_L2 = static_cast<int>(infos[i].Cache.Size / 1024);
-          break;
-        case 3:
-          *cache_size_L3 = static_cast<int>(infos[i].Cache.Size / 1024);
-          break;
-        default:
-          break;
-      }
-    }
-  }
-  if (infos != &info_buffer[0]) {
-    delete[] infos;
-  }
-  return;
-}
-#endif
-
 nsresult nsSystemInfo::Init() {
   // This uses the observer service on Windows, so for simplicity
   // check that it is called from the main thread on all platforms.
@@ -406,266 +205,6 @@ nsresult nsSystemInfo::Init() {
                          false);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // Additional informations not available through PR_GetSystemInfo.
-  SetInt32Property(NS_LITERAL_STRING("pagesize"), PR_GetPageSize());
-  SetInt32Property(NS_LITERAL_STRING("pageshift"), PR_GetPageShift());
-  SetInt32Property(NS_LITERAL_STRING("memmapalign"), PR_GetMemMapAlignment());
-  SetUint64Property(NS_LITERAL_STRING("memsize"), PR_GetPhysicalMemorySize());
-  SetUint32Property(NS_LITERAL_STRING("umask"), nsSystemInfo::gUserUmask);
-
-  uint64_t virtualMem = 0;
-  nsAutoCString cpuVendor;
-  int cpuSpeed = -1;
-  int cpuFamily = -1;
-  int cpuModel = -1;
-  int cpuStepping = -1;
-  int logicalCPUs = -1;
-  int physicalCPUs = -1;
-  int cacheSizeL2 = -1;
-  int cacheSizeL3 = -1;
-
-#if defined(XP_WIN)
-  // Virtual memory:
-  MEMORYSTATUSEX memStat;
-  memStat.dwLength = sizeof(memStat);
-  if (GlobalMemoryStatusEx(&memStat)) {
-    virtualMem = memStat.ullTotalVirtual;
-  }
-
-  // CPU speed
-  HKEY key;
-  static const WCHAR keyName[] =
-      L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0";
-
-  if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, keyName, 0, KEY_QUERY_VALUE, &key) ==
-      ERROR_SUCCESS) {
-    DWORD data, len, vtype;
-    len = sizeof(data);
-
-    if (RegQueryValueEx(key, L"~Mhz", 0, 0, reinterpret_cast<LPBYTE>(&data),
-                        &len) == ERROR_SUCCESS) {
-      cpuSpeed = static_cast<int>(data);
-    }
-
-    // Limit to 64 double byte characters, should be plenty, but create
-    // a buffer one larger as the result may not be null terminated. If
-    // it is more than 64, we will not get the value.
-    wchar_t cpuVendorStr[64 + 1];
-    len = sizeof(cpuVendorStr) - 2;
-    if (RegQueryValueExW(key, L"VendorIdentifier", 0, &vtype,
-                         reinterpret_cast<LPBYTE>(cpuVendorStr),
-                         &len) == ERROR_SUCCESS &&
-        vtype == REG_SZ && len % 2 == 0 && len > 1) {
-      cpuVendorStr[len / 2] = 0;  // In case it isn't null terminated
-      CopyUTF16toUTF8(nsDependentString(cpuVendorStr), cpuVendor);
-    }
-
-    RegCloseKey(key);
-  }
-
-  // Other CPU attributes:
-  SYSTEM_INFO si;
-  GetNativeSystemInfo(&si);
-  logicalCPUs = si.dwNumberOfProcessors;
-  GetProcessorInformation(&physicalCPUs, &cacheSizeL2, &cacheSizeL3);
-  if (physicalCPUs <= 0) {
-    physicalCPUs = logicalCPUs;
-  }
-  cpuFamily = si.wProcessorLevel;
-  cpuModel = si.wProcessorRevision >> 8;
-  cpuStepping = si.wProcessorRevision & 0xFF;
-#elif defined(XP_MACOSX)
-  // CPU speed
-  uint64_t sysctlValue64 = 0;
-  uint32_t sysctlValue32 = 0;
-  size_t len = 0;
-  len = sizeof(sysctlValue64);
-  if (!sysctlbyname("hw.cpufrequency_max", &sysctlValue64, &len, NULL, 0)) {
-    cpuSpeed = static_cast<int>(sysctlValue64 / 1000000);
-  }
-  MOZ_ASSERT(sizeof(sysctlValue64) == len);
-
-  len = sizeof(sysctlValue32);
-  if (!sysctlbyname("hw.physicalcpu_max", &sysctlValue32, &len, NULL, 0)) {
-    physicalCPUs = static_cast<int>(sysctlValue32);
-  }
-  MOZ_ASSERT(sizeof(sysctlValue32) == len);
-
-  len = sizeof(sysctlValue32);
-  if (!sysctlbyname("hw.logicalcpu_max", &sysctlValue32, &len, NULL, 0)) {
-    logicalCPUs = static_cast<int>(sysctlValue32);
-  }
-  MOZ_ASSERT(sizeof(sysctlValue32) == len);
-
-  len = sizeof(sysctlValue64);
-  if (!sysctlbyname("hw.l2cachesize", &sysctlValue64, &len, NULL, 0)) {
-    cacheSizeL2 = static_cast<int>(sysctlValue64 / 1024);
-  }
-  MOZ_ASSERT(sizeof(sysctlValue64) == len);
-
-  len = sizeof(sysctlValue64);
-  if (!sysctlbyname("hw.l3cachesize", &sysctlValue64, &len, NULL, 0)) {
-    cacheSizeL3 = static_cast<int>(sysctlValue64 / 1024);
-  }
-  MOZ_ASSERT(sizeof(sysctlValue64) == len);
-
-  if (!sysctlbyname("machdep.cpu.vendor", NULL, &len, NULL, 0)) {
-    char* cpuVendorStr = new char[len];
-    if (!sysctlbyname("machdep.cpu.vendor", cpuVendorStr, &len, NULL, 0)) {
-      cpuVendor = cpuVendorStr;
-    }
-    delete[] cpuVendorStr;
-  }
-
-  len = sizeof(sysctlValue32);
-  if (!sysctlbyname("machdep.cpu.family", &sysctlValue32, &len, NULL, 0)) {
-    cpuFamily = static_cast<int>(sysctlValue32);
-  }
-  MOZ_ASSERT(sizeof(sysctlValue32) == len);
-
-  len = sizeof(sysctlValue32);
-  if (!sysctlbyname("machdep.cpu.model", &sysctlValue32, &len, NULL, 0)) {
-    cpuModel = static_cast<int>(sysctlValue32);
-  }
-  MOZ_ASSERT(sizeof(sysctlValue32) == len);
-
-  len = sizeof(sysctlValue32);
-  if (!sysctlbyname("machdep.cpu.stepping", &sysctlValue32, &len, NULL, 0)) {
-    cpuStepping = static_cast<int>(sysctlValue32);
-  }
-  MOZ_ASSERT(sizeof(sysctlValue32) == len);
-
-#elif defined(XP_LINUX) && !defined(ANDROID)
-  // Get vendor, family, model, stepping, physical cores, L3 cache size
-  // from /proc/cpuinfo file
-  {
-    std::map<nsCString, nsCString> keyValuePairs;
-    SimpleParseKeyValuePairs("/proc/cpuinfo", keyValuePairs);
-
-    // cpuVendor from "vendor_id"
-    cpuVendor.Assign(keyValuePairs[NS_LITERAL_CSTRING("vendor_id")]);
-
-    {
-      // cpuFamily from "cpu family"
-      Tokenizer::Token t;
-      Tokenizer p(keyValuePairs[NS_LITERAL_CSTRING("cpu family")]);
-      if (p.Next(t) && t.Type() == Tokenizer::TOKEN_INTEGER &&
-          t.AsInteger() <= INT32_MAX) {
-        cpuFamily = static_cast<int>(t.AsInteger());
-      }
-    }
-
-    {
-      // cpuModel from "model"
-      Tokenizer::Token t;
-      Tokenizer p(keyValuePairs[NS_LITERAL_CSTRING("model")]);
-      if (p.Next(t) && t.Type() == Tokenizer::TOKEN_INTEGER &&
-          t.AsInteger() <= INT32_MAX) {
-        cpuModel = static_cast<int>(t.AsInteger());
-      }
-    }
-
-    {
-      // cpuStepping from "stepping"
-      Tokenizer::Token t;
-      Tokenizer p(keyValuePairs[NS_LITERAL_CSTRING("stepping")]);
-      if (p.Next(t) && t.Type() == Tokenizer::TOKEN_INTEGER &&
-          t.AsInteger() <= INT32_MAX) {
-        cpuStepping = static_cast<int>(t.AsInteger());
-      }
-    }
-
-    {
-      // physicalCPUs from "cpu cores"
-      Tokenizer::Token t;
-      Tokenizer p(keyValuePairs[NS_LITERAL_CSTRING("cpu cores")]);
-      if (p.Next(t) && t.Type() == Tokenizer::TOKEN_INTEGER &&
-          t.AsInteger() <= INT32_MAX) {
-        physicalCPUs = static_cast<int>(t.AsInteger());
-      }
-    }
-
-    {
-      // cacheSizeL3 from "cache size"
-      Tokenizer::Token t;
-      Tokenizer p(keyValuePairs[NS_LITERAL_CSTRING("cache size")]);
-      if (p.Next(t) && t.Type() == Tokenizer::TOKEN_INTEGER &&
-          t.AsInteger() <= INT32_MAX) {
-        cacheSizeL3 = static_cast<int>(t.AsInteger());
-        if (p.Next(t) && t.Type() == Tokenizer::TOKEN_WORD &&
-            t.AsString() != NS_LITERAL_CSTRING("KB")) {
-          // If we get here, there was some text after the cache size value
-          // and that text was not KB.  For now, just don't report the
-          // L3 cache.
-          cacheSizeL3 = -1;
-        }
-      }
-    }
-  }
-
-  {
-    // Get cpuSpeed from another file.
-    std::ifstream input(
-        "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq");
-    std::string line;
-    if (getline(input, line)) {
-      Tokenizer::Token t;
-      Tokenizer p(line.c_str());
-      if (p.Next(t) && t.Type() == Tokenizer::TOKEN_INTEGER &&
-          t.AsInteger() <= INT32_MAX) {
-        cpuSpeed = static_cast<int>(t.AsInteger() / 1000);
-      }
-    }
-  }
-
-  {
-    // Get cacheSizeL2 from yet another file
-    std::ifstream input("/sys/devices/system/cpu/cpu0/cache/index2/size");
-    std::string line;
-    if (getline(input, line)) {
-      Tokenizer::Token t;
-      Tokenizer p(line.c_str(), nullptr, "K");
-      if (p.Next(t) && t.Type() == Tokenizer::TOKEN_INTEGER &&
-          t.AsInteger() <= INT32_MAX) {
-        cacheSizeL2 = static_cast<int>(t.AsInteger());
-      }
-    }
-  }
-
-  SetInt32Property(NS_LITERAL_STRING("cpucount"), PR_GetNumberOfProcessors());
-#else
-  SetInt32Property(NS_LITERAL_STRING("cpucount"), PR_GetNumberOfProcessors());
-#endif
-
-  if (virtualMem)
-    SetUint64Property(NS_LITERAL_STRING("virtualmemsize"), virtualMem);
-  if (cpuSpeed >= 0) SetInt32Property(NS_LITERAL_STRING("cpuspeed"), cpuSpeed);
-  if (!cpuVendor.IsEmpty())
-    SetPropertyAsACString(NS_LITERAL_STRING("cpuvendor"), cpuVendor);
-  if (cpuFamily >= 0)
-    SetInt32Property(NS_LITERAL_STRING("cpufamily"), cpuFamily);
-  if (cpuModel >= 0) SetInt32Property(NS_LITERAL_STRING("cpumodel"), cpuModel);
-  if (cpuStepping >= 0)
-    SetInt32Property(NS_LITERAL_STRING("cpustepping"), cpuStepping);
-
-  if (logicalCPUs >= 0)
-    SetInt32Property(NS_LITERAL_STRING("cpucount"), logicalCPUs);
-  if (physicalCPUs >= 0)
-    SetInt32Property(NS_LITERAL_STRING("cpucores"), physicalCPUs);
-
-  if (cacheSizeL2 >= 0)
-    SetInt32Property(NS_LITERAL_STRING("cpucachel2"), cacheSizeL2);
-  if (cacheSizeL3 >= 0)
-    SetInt32Property(NS_LITERAL_STRING("cpucachel3"), cacheSizeL3);
-
-  for (uint32_t i = 0; i < ArrayLength(cpuPropItems); i++) {
-    rv = SetPropertyAsBool(NS_ConvertASCIItoUTF16(cpuPropItems[i].name),
-                           cpuPropItems[i].propfun());
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-  }
-
 #ifdef XP_WIN
   bool isMinGW =
 #  ifdef __MINGW32__
@@ -678,28 +217,15 @@ nsresult nsSystemInfo::Init() {
     return rv;
   }
 
-  // IsWow64Process2 is only available on Windows 10+, so we have to dynamically
-  // check for its existence.
-  typedef BOOL(WINAPI * LPFN_IWP2)(HANDLE, USHORT*, USHORT*);
-  LPFN_IWP2 iwp2 = reinterpret_cast<LPFN_IWP2>(
-      GetProcAddress(GetModuleHandle(L"kernel32"), "IsWow64Process2"));
   BOOL isWow64 = false;
   USHORT processMachine = IMAGE_FILE_MACHINE_UNKNOWN;
   USHORT nativeMachine = IMAGE_FILE_MACHINE_UNKNOWN;
-  BOOL gotWow64Value;
-  if (iwp2) {
-    gotWow64Value = iwp2(GetCurrentProcess(), &processMachine, &nativeMachine);
-    if (gotWow64Value) {
-      isWow64 = (processMachine != IMAGE_FILE_MACHINE_UNKNOWN);
-    }
-  } else {
-    gotWow64Value = IsWow64Process(GetCurrentProcess(), &isWow64);
-    // The function only indicates a WOW64 environment if it's 32-bit x86
-    // running on x86-64, so emulate what IsWow64Process2 would have given.
-    if (gotWow64Value && isWow64) {
-      processMachine = IMAGE_FILE_MACHINE_I386;
-      nativeMachine = IMAGE_FILE_MACHINE_AMD64;
-    }
+  BOOL gotWow64Value = IsWow64Process(GetCurrentProcess(), &isWow64);
+  // The function only indicates a WOW64 environment if it's 32-bit x86
+  // running on x86-64, so emulate what IsWow64Process2 would have given.
+  if (gotWow64Value && isWow64) {
+    processMachine = IMAGE_FILE_MACHINE_I386;
+    nativeMachine = IMAGE_FILE_MACHINE_AMD64;
   }
   NS_WARNING_ASSERTION(gotWow64Value, "IsWow64Process failed");
   if (gotWow64Value) {
@@ -716,52 +242,10 @@ nsresult nsSystemInfo::Init() {
       return rv;
     }
   }
-  if (NS_FAILED(GetProfileHDDInfo())) {
-    // We might have been called before profile-do-change. We'll observe that
-    // event so that we can fill this in later.
-    nsCOMPtr<nsIObserverService> obsService =
-        do_GetService(NS_OBSERVERSERVICE_CONTRACTID, &rv);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-    rv = obsService->AddObserver(this, "profile-do-change", false);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-  }
-  nsAutoCString hddModel, hddRevision, hddType;
-  if (NS_SUCCEEDED(GetHDDInfo(NS_GRE_DIR, hddModel, hddRevision, hddType))) {
-    rv = SetPropertyAsACString(NS_LITERAL_STRING("binHDDModel"), hddModel);
-    NS_ENSURE_SUCCESS(rv, rv);
-    rv =
-        SetPropertyAsACString(NS_LITERAL_STRING("binHDDRevision"), hddRevision);
-    NS_ENSURE_SUCCESS(rv, rv);
-    rv = SetPropertyAsACString(NS_LITERAL_STRING("binHDDType"), hddType);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-  if (NS_SUCCEEDED(
-          GetHDDInfo(NS_WIN_WINDOWS_DIR, hddModel, hddRevision, hddType))) {
-    rv = SetPropertyAsACString(NS_LITERAL_STRING("winHDDModel"), hddModel);
-    NS_ENSURE_SUCCESS(rv, rv);
-    rv =
-        SetPropertyAsACString(NS_LITERAL_STRING("winHDDRevision"), hddRevision);
-    NS_ENSURE_SUCCESS(rv, rv);
-    rv = SetPropertyAsACString(NS_LITERAL_STRING("winHDDType"), hddType);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
   nsAutoString countryCode;
   if (NS_SUCCEEDED(GetCountryCode(countryCode))) {
     rv = SetPropertyAsAString(NS_LITERAL_STRING("countryCode"), countryCode);
     NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  uint32_t installYear = 0;
-  if (NS_SUCCEEDED(GetInstallYear(installYear))) {
-    rv = SetPropertyAsUint32(NS_LITERAL_STRING("installYear"), installYear);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
   }
 
 #endif
@@ -814,8 +298,7 @@ nsresult nsSystemInfo::Init() {
     dlclose(libpulse);
   }
 
-  rv = SetPropertyAsACString(NS_LITERAL_STRING("secondaryLibrary"),
-                             secondaryLibrary);
+  rv = SetPropertyAsACString(u"secondaryLibrary"_ns, secondaryLibrary);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -830,23 +313,21 @@ nsresult nsSystemInfo::Init() {
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX)
   SandboxInfo sandInfo = SandboxInfo::Get();
 
-  SetPropertyAsBool(NS_LITERAL_STRING("hasSeccompBPF"),
+  SetPropertyAsBool(u"hasSeccompBPF"_ns,
                     sandInfo.Test(SandboxInfo::kHasSeccompBPF));
-  SetPropertyAsBool(NS_LITERAL_STRING("hasSeccompTSync"),
+  SetPropertyAsBool(u"hasSeccompTSync"_ns,
                     sandInfo.Test(SandboxInfo::kHasSeccompTSync));
-  SetPropertyAsBool(NS_LITERAL_STRING("hasUserNamespaces"),
+  SetPropertyAsBool(u"hasUserNamespaces"_ns,
                     sandInfo.Test(SandboxInfo::kHasUserNamespaces));
-  SetPropertyAsBool(NS_LITERAL_STRING("hasPrivilegedUserNamespaces"),
+  SetPropertyAsBool(u"hasPrivilegedUserNamespaces"_ns,
                     sandInfo.Test(SandboxInfo::kHasPrivilegedUserNamespaces));
 
   if (sandInfo.Test(SandboxInfo::kEnabledForContent)) {
-    SetPropertyAsBool(NS_LITERAL_STRING("canSandboxContent"),
-                      sandInfo.CanSandboxContent());
+    SetPropertyAsBool(u"canSandboxContent"_ns, sandInfo.CanSandboxContent());
   }
 
   if (sandInfo.Test(SandboxInfo::kEnabledForMedia)) {
-    SetPropertyAsBool(NS_LITERAL_STRING("canSandboxMedia"),
-                      sandInfo.CanSandboxMedia());
+    SetPropertyAsBool(u"canSandboxMedia"_ns, sandInfo.CanSandboxMedia());
   }
 #endif  // XP_LINUX && MOZ_SANDBOX
 
@@ -900,31 +381,29 @@ void nsSystemInfo::GetAndroidSystemInfo(AndroidSystemInfo* aInfo) {
 
 void nsSystemInfo::SetupAndroidInfo(const AndroidSystemInfo& aInfo) {
   if (!aInfo.device().IsEmpty()) {
-    SetPropertyAsAString(NS_LITERAL_STRING("device"), aInfo.device());
+    SetPropertyAsAString(u"device"_ns, aInfo.device());
   }
   if (!aInfo.manufacturer().IsEmpty()) {
-    SetPropertyAsAString(NS_LITERAL_STRING("manufacturer"),
-                         aInfo.manufacturer());
+    SetPropertyAsAString(u"manufacturer"_ns, aInfo.manufacturer());
   }
   if (!aInfo.release_version().IsEmpty()) {
-    SetPropertyAsAString(NS_LITERAL_STRING("release_version"),
-                         aInfo.release_version());
+    SetPropertyAsAString(u"release_version"_ns, aInfo.release_version());
   }
-  SetPropertyAsBool(NS_LITERAL_STRING("tablet"), aInfo.isTablet());
+  SetPropertyAsBool(u"tablet"_ns, aInfo.isTablet());
   // NSPR "version" is the kernel version. For Android we want the Android
   // version. Rename SDK version to version and put the kernel version into
   // kernel_version.
   nsAutoString str;
-  nsresult rv = GetPropertyAsAString(NS_LITERAL_STRING("version"), str);
+  nsresult rv = GetPropertyAsAString(u"version"_ns, str);
   if (NS_SUCCEEDED(rv)) {
-    SetPropertyAsAString(NS_LITERAL_STRING("kernel_version"), str);
+    SetPropertyAsAString(u"kernel_version"_ns, str);
   }
   // When JNI is not available (eg. in xpcshell tests), sdk_version is 0.
   if (aInfo.sdk_version() != 0) {
     if (!aInfo.hardware().IsEmpty()) {
-      SetPropertyAsAString(NS_LITERAL_STRING("hardware"), aInfo.hardware());
+      SetPropertyAsAString(u"hardware"_ns, aInfo.hardware());
     }
-    SetPropertyAsInt32(NS_LITERAL_STRING("version"), aInfo.sdk_version());
+    SetPropertyAsInt32(u"version"_ns, aInfo.sdk_version());
   }
 }
 #endif  // MOZ_WIDGET_ANDROID
@@ -979,29 +458,8 @@ nsSystemInfo::Observe(nsISupports* aSubject, const char* aTopic,
     if (NS_FAILED(rv)) {
       return rv;
     }
-    return GetProfileHDDInfo();
   }
   return NS_OK;
-}
-
-nsresult nsSystemInfo::GetProfileHDDInfo() {
-  nsAutoCString hddModel, hddRevision, hddType;
-  nsresult rv =
-      GetHDDInfo(NS_APP_USER_PROFILE_50_DIR, hddModel, hddRevision, hddType);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-  rv = SetPropertyAsACString(NS_LITERAL_STRING("profileHDDModel"), hddModel);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-  rv = SetPropertyAsACString(NS_LITERAL_STRING("profileHDDRevision"),
-                             hddRevision);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-  rv = SetPropertyAsACString(NS_LITERAL_STRING("profileHDDType"), hddType);
-  return rv;
 }
 
 NS_IMPL_ISUPPORTS_INHERITED(nsSystemInfo, nsHashPropertyBag, nsIObserver)

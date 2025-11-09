@@ -67,8 +67,7 @@ class TimerThread final : public nsIRunnable, public nsIObserver {
   void RemoveFirstTimerInternal();
   nsresult Init();
 
-  already_AddRefed<nsTimerImpl> PostTimerEvent(
-      already_AddRefed<nsTimerImpl> aTimerRef);
+  void PostTimerEvent(already_AddRefed<nsTimerImpl> aTimerRef);
 
   nsCOMPtr<nsIThread> mThread;
   Monitor mMonitor;

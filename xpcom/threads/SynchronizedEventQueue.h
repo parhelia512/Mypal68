@@ -9,6 +9,7 @@
 #include "mozilla/AbstractEventQueue.h"
 #include "mozilla/MemoryReporting.h"
 #include "base/lock.h"
+#include "nsCOMPtr.h"
 #include "nsTObserverArray.h"
 
 class nsIEventTarget;

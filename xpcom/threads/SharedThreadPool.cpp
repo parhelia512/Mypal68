@@ -7,7 +7,7 @@
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
-#include "nsDataHashtable.h"
+#include "nsTHashMap.h"
 #include "nsXPCOMCIDInternal.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIObserver.h"
@@ -25,8 +25,7 @@ static StaticAutoPtr<ReentrantMonitor> sMonitor;
 
 // Hashtable, maps thread pool name to SharedThreadPool instance.
 // Modified only on the main thread.
-static StaticAutoPtr<nsDataHashtable<nsCStringHashKey, SharedThreadPool*>>
-    sPools;
+static StaticAutoPtr<nsTHashMap<nsCStringHashKey, SharedThreadPool*>> sPools;
 
 static already_AddRefed<nsIThreadPool> CreateThreadPool(const nsCString& aName);
 
@@ -70,7 +69,7 @@ void SharedThreadPool::InitStatics() {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!sMonitor && !sPools);
   sMonitor = new ReentrantMonitor("SharedThreadPool");
-  sPools = new nsDataHashtable<nsCStringHashKey, SharedThreadPool*>();
+  sPools = new nsTHashMap<nsCStringHashKey, SharedThreadPool*>();
   nsCOMPtr<nsIObserverService> obsService =
       mozilla::services::GetObserverService();
   nsCOMPtr<nsIObserver> obs = new SharedThreadPoolShutdownObserver();

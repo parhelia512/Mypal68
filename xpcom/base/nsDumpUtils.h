@@ -175,7 +175,7 @@ class nsDumpUtils {
    * instead.
    */
   static nsresult OpenTempFile(const nsACString& aFilename, nsIFile** aFile,
-                               const nsACString& aFoldername = EmptyCString(),
+                               const nsACString& aFoldername = ""_ns,
                                Mode aMode = CREATE_UNIQUE);
 };
 

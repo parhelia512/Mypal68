@@ -53,10 +53,6 @@ class nsSystemInfo final : public nsHashPropertyBag
 
  private:
   ~nsSystemInfo();
-
-#if defined(XP_WIN)
-  nsresult GetProfileHDDInfo();
-#endif  // defined(XP_WIN)
 };
 
 #define NS_SYSTEMINFO_CONTRACTID "@mozilla.org/system-info;1"

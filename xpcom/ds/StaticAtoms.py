@@ -151,6 +151,7 @@ STATIC_ATOMS = [
     Atom("attributes", "attributes"),
     Atom("attributeSet", "attribute-set"),
     Atom("_auto", "auto"),
+    Atom("autocapitalize", "autocapitalize"),
     Atom("autocheck", "autocheck"),
     Atom("autocomplete", "autocomplete"),
     Atom("autocomplete_richlistbox", "autocomplete-richlistbox"),
@@ -562,7 +563,6 @@ STATIC_ATOMS = [
     Atom("keypress", "keypress"),
     Atom("keyset", "keyset"),
     Atom("keysystem", "keysystem"),
-    Atom("keytext", "keytext"),
     Atom("keyup", "keyup"),
     Atom("kind", "kind"),
     Atom("korean_hangul_formal", "korean-hangul-formal"),
@@ -1879,9 +1879,7 @@ STATIC_ATOMS = [
     Atom("ondevicemotion", "ondevicemotion"),
     Atom("ondeviceorientation", "ondeviceorientation"),
     Atom("onabsolutedeviceorientation", "onabsolutedeviceorientation"),
-    Atom("ondeviceproximity", "ondeviceproximity"),
     Atom("onmozorientationchange", "onmozorientationchange"),
-    Atom("onuserproximity", "onuserproximity"),
 
     # light sensor support
     Atom("ondevicelight", "ondevicelight"),

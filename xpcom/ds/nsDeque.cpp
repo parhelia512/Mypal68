@@ -10,13 +10,15 @@
 
 #define modulus(x, y) ((x) % (y))
 
+namespace mozilla {
+namespace detail {
+
 /**
  * Standard constructor
- * @param deallocator, called by Erase and ~nsDeque
+ * @param deallocator, called by Erase and ~nsDequeBase
  */
-nsDeque::nsDeque(nsDequeFunctor* aDeallocator) {
-  MOZ_COUNT_CTOR(nsDeque);
-  mDeallocator = aDeallocator;
+nsDequeBase::nsDequeBase() {
+  MOZ_COUNT_CTOR(nsDequeBase);
   mOrigin = mSize = 0;
   mData = mBuffer;  // don't allocate space until you must
   mCapacity = sizeof(mBuffer) / sizeof(mBuffer[0]);
@@ -26,64 +28,34 @@ nsDeque::nsDeque(nsDequeFunctor* aDeallocator) {
 /**
  * Destructor
  */
-nsDeque::~nsDeque() {
-  MOZ_COUNT_DTOR(nsDeque);
+nsDequeBase::~nsDequeBase() {
+  MOZ_COUNT_DTOR(nsDequeBase);
 
-  Erase();
   if (mData && mData != mBuffer) {
     free(mData);
   }
-  mData = 0;
-  SetDeallocator(0);
+  mData = nullptr;
 }
 
-size_t nsDeque::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
+size_t nsDequeBase::SizeOfExcludingThis(
+    mozilla::MallocSizeOf aMallocSizeOf) const {
   size_t size = 0;
   if (mData != mBuffer) {
     size += aMallocSizeOf(mData);
   }
 
-  if (mDeallocator) {
-    size += aMallocSizeOf(mDeallocator);
-  }
-
   return size;
-}
-
-size_t nsDeque::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
-  return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
-}
-
-/**
- * Set the functor to be called by Erase()
- * The deque owns the functor.
- *
- * @param   aDeallocator functor object for use by Erase()
- */
-void nsDeque::SetDeallocator(nsDequeFunctor* aDeallocator) {
-  delete mDeallocator;
-  mDeallocator = aDeallocator;
 }
 
 /**
  * Remove all items from container without destroying them.
  */
-void nsDeque::Empty() {
+void nsDequeBase::Empty() {
   if (mSize && mData) {
     memset(mData, 0, mCapacity * sizeof(*mData));
   }
   mSize = 0;
   mOrigin = 0;
-}
-
-/**
- * Remove and delete all items from container
- */
-void nsDeque::Erase() {
-  if (mDeallocator && mSize) {
-    ForEach(*mDeallocator);
-  }
-  Empty();
 }
 
 /**
@@ -93,7 +65,7 @@ void nsDeque::Erase() {
  *
  * @return  whether growing succeeded
  */
-bool nsDeque::GrowCapacity() {
+bool nsDequeBase::GrowCapacity() {
   mozilla::CheckedInt<size_t> newCapacity = mCapacity;
   newCapacity *= 4;
 
@@ -142,7 +114,7 @@ bool nsDeque::GrowCapacity() {
  *
  * @param   aItem: new item to be added to deque
  */
-bool nsDeque::Push(void* aItem, const fallible_t&) {
+bool nsDequeBase::Push(void* aItem, const fallible_t&) {
   if (mSize == mCapacity && !GrowCapacity()) {
     return false;
   }
@@ -183,7 +155,7 @@ bool nsDeque::Push(void* aItem, const fallible_t&) {
  * --
  * @param   aItem: new item to be added to deque
  */
-bool nsDeque::PushFront(void* aItem, const fallible_t&) {
+bool nsDequeBase::PushFront(void* aItem, const fallible_t&) {
   if (mOrigin == 0) {
     mOrigin = mCapacity - 1;
   } else {
@@ -207,13 +179,13 @@ bool nsDeque::PushFront(void* aItem, const fallible_t&) {
  *
  * @return  ptr to last item in container
  */
-void* nsDeque::Pop() {
-  void* result = 0;
+void* nsDequeBase::Pop() {
+  void* result = nullptr;
   if (mSize > 0) {
     --mSize;
     size_t offset = modulus(mSize + mOrigin, mCapacity);
     result = mData[offset];
-    mData[offset] = 0;
+    mData[offset] = nullptr;
     if (!mSize) {
       mOrigin = 0;
     }
@@ -227,12 +199,12 @@ void* nsDeque::Pop() {
  *
  * @return  last item in container
  */
-void* nsDeque::PopFront() {
-  void* result = 0;
+void* nsDequeBase::PopFront() {
+  void* result = nullptr;
   if (mSize > 0) {
     NS_ASSERTION(mOrigin < mCapacity, "Error: Bad origin");
     result = mData[mOrigin];
-    mData[mOrigin++] = 0;  // zero it out for debugging purposes.
+    mData[mOrigin++] = nullptr;  // zero it out for debugging purposes.
     mSize--;
     // Cycle around if we pop off the end
     // and reset origin if when we pop the last element
@@ -249,8 +221,8 @@ void* nsDeque::PopFront() {
  *
  * @return  last item in container
  */
-void* nsDeque::Peek() const {
-  void* result = 0;
+void* nsDequeBase::Peek() const {
+  void* result = nullptr;
   if (mSize > 0) {
     result = mData[modulus(mSize - 1 + mOrigin, mCapacity)];
   }
@@ -263,8 +235,8 @@ void* nsDeque::Peek() const {
  *
  * @return  last item in container
  */
-void* nsDeque::PeekFront() const {
-  void* result = 0;
+void* nsDequeBase::PeekFront() const {
+  void* result = nullptr;
   if (mSize > 0) {
     result = mData[mOrigin];
   }
@@ -280,24 +252,12 @@ void* nsDeque::PeekFront() const {
  * @param   aIndex : 0 relative offset of item you want
  * @return  void* or null
  */
-void* nsDeque::ObjectAt(size_t aIndex) const {
-  void* result = 0;
+void* nsDequeBase::ObjectAt(size_t aIndex) const {
+  void* result = nullptr;
   if (aIndex < mSize) {
     result = mData[modulus(mOrigin + aIndex, mCapacity)];
   }
   return result;
 }
-
-/**
- * Call this method when you want to iterate all the
- * members of the container, passing a functor along
- * to call your code.
- *
- * @param   aFunctor object to call for each member
- * @return  *this
- */
-void nsDeque::ForEach(nsDequeFunctor& aFunctor) const {
-  for (size_t i = 0; i < mSize; ++i) {
-    aFunctor(ObjectAt(i));
-  }
-}
+}  // namespace detail
+}  // namespace mozilla

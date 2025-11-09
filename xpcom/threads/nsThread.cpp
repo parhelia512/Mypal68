@@ -91,21 +91,9 @@ using GetCurrentThreadStackLimitsFn = void(WINAPI*)(PULONG_PTR LowLimit,
 #  include "nsXULAppAPI.h"
 #endif
 
-#if defined(NS_FUNCTION_TIMER) && defined(_MSC_VER)
-#  include "nsTimerImpl.h"
-#  include "mozilla/StackWalk.h"
-#endif
-#ifdef NS_FUNCTION_TIMER
-#  include "nsCRT.h"
-#endif
-
-#ifdef MOZ_TASK_TRACER
-#  include "GeckoTaskTracer.h"
-#  include "TracedTaskCommon.h"
-using namespace mozilla::tasktracer;
-#endif
-
 using namespace mozilla;
+
+extern void InitThreadLocalVariables();
 
 static LazyLogModule sThreadLog("nsThread");
 #ifdef LOG
@@ -231,28 +219,6 @@ class nsThreadStartupEvent final : public Runnable {
   bool mInitialized;
 };
 //-----------------------------------------------------------------------------
-
-struct nsThreadShutdownContext {
-  nsThreadShutdownContext(NotNull<nsThread*> aTerminatingThread,
-                          NotNull<nsThread*> aJoiningThread,
-                          bool aAwaitingShutdownAck)
-      : mTerminatingThread(aTerminatingThread),
-        mTerminatingPRThread(aTerminatingThread->GetPRThread()),
-        mJoiningThread(aJoiningThread),
-        mAwaitingShutdownAck(aAwaitingShutdownAck),
-        mIsMainThreadJoining(NS_IsMainThread()) {
-    MOZ_COUNT_CTOR(nsThreadShutdownContext);
-  }
-  MOZ_COUNTED_DTOR(nsThreadShutdownContext)
-
-  // NB: This will be the last reference.
-  NotNull<RefPtr<nsThread>> mTerminatingThread;
-  PRThread* const mTerminatingPRThread;
-  NotNull<nsThread*> MOZ_UNSAFE_REF(
-      "Thread manager is holding reference to joining thread") mJoiningThread;
-  bool mAwaitingShutdownAck;
-  bool mIsMainThreadJoining;
-};
 
 bool nsThread::ShutdownContextsComp::Equals(
     const ShutdownContexts::elem_type& a,
@@ -509,10 +475,6 @@ void nsThread::ThreadFunc(void* aArg) {
 
   // Release any observer of the thread here.
   self->SetObserver(nullptr);
-
-#ifdef MOZ_TASK_TRACER
-  FreeTraceInfo();
-#endif
 
   // The PRThread will be deleted in PR_JoinThread(), so clear references.
   self->mThread = nullptr;

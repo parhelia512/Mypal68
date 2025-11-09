@@ -16,7 +16,6 @@
 #include "nsAtom.h"
 #include "nsAtomTable.h"
 #include "nsCRT.h"
-#include "nsDataHashtable.h"
 #include "nsGkAtoms.h"
 #include "nsHashKeys.h"
 #include "nsPrintfCString.h"

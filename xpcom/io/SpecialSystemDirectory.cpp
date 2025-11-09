@@ -645,7 +645,7 @@ nsresult GetOSXFolderType(short aDomain, OSType aFolderType,
   nsresult rv = NS_ERROR_FAILURE;
 
   if (aFolderType == kTemporaryFolderType) {
-    NS_NewLocalFile(EmptyString(), true, aLocalFile);
+    NS_NewLocalFile(u""_ns, true, aLocalFile);
     nsCOMPtr<nsILocalFileMac> localMacFile(do_QueryInterface(*aLocalFile));
     if (localMacFile) {
       rv = localMacFile->InitWithCFURL(
@@ -658,7 +658,7 @@ nsresult GetOSXFolderType(short aDomain, OSType aFolderType,
   FSRef fsRef;
   err = ::FSFindFolder(aDomain, aFolderType, kCreateFolder, &fsRef);
   if (err == noErr) {
-    NS_NewLocalFile(EmptyString(), true, aLocalFile);
+    NS_NewLocalFile(u""_ns, true, aLocalFile);
     nsCOMPtr<nsILocalFileMac> localMacFile(do_QueryInterface(*aLocalFile));
     if (localMacFile) {
       rv = localMacFile->InitWithFSRef(&fsRef);

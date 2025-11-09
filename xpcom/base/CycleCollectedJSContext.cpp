@@ -327,7 +327,7 @@ void CycleCollectedJSContext::PromiseRejectionTrackerCallback(
       RefPtr<Promise> promise =
           Promise::CreateFromExisting(xpc::NativeGlobal(aPromise), aPromise);
       aboutToBeNotified.AppendElement(promise);
-      unhandled.Put(promiseID, std::move(promise));
+      unhandled.InsertOrUpdate(promiseID, std::move(promise));
     }
   } else {
     PromiseDebugging::AddConsumedRejection(aPromise);
@@ -801,6 +801,10 @@ void FinalizationRegistryCleanup::DoCleanup() {
   std::swap(callbacks.get(), mCallbacks.get());
 
   for (const Callback& callback : callbacks) {
+    JS::ExposeObjectToActiveJS(
+        JS_GetFunctionObject(callback.mCallbackFunction));
+    JS::ExposeObjectToActiveJS(callback.mIncumbentGlobal);
+
     JS::RootedObject functionObj(
         cx, JS_GetFunctionObject(callback.mCallbackFunction));
     JS::RootedObject globalObj(cx, JS::GetNonCCWObjectGlobal(functionObj));
@@ -824,8 +828,8 @@ void FinalizationRegistryCleanup::DoCleanup() {
 }
 
 void FinalizationRegistryCleanup::Callback::trace(JSTracer* trc) {
-  JS::UnsafeTraceRoot(trc, &mCallbackFunction, "mCallbackFunction");
-  JS::UnsafeTraceRoot(trc, &mIncumbentGlobal, "mIncumbentGlobal");
+  JS::TraceRoot(trc, &mCallbackFunction, "mCallbackFunction");
+  JS::TraceRoot(trc, &mIncumbentGlobal, "mIncumbentGlobal");
 }
 
 }  // namespace mozilla

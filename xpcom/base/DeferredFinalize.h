@@ -25,7 +25,7 @@ typedef bool (*DeferredFinalizeFunction)(uint32_t aSlice, void* aData);
 void DeferredFinalize(DeferredFinalizeAppendFunction aAppendFunc,
                       DeferredFinalizeFunction aFunc, void* aThing);
 
-void DeferredFinalize(nsISupports* aSupports);
+MOZ_NEVER_INLINE void DeferredFinalize(nsISupports* aSupports);
 
 }  // namespace mozilla
 

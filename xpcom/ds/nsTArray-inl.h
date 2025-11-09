@@ -13,7 +13,7 @@ nsTArray_base<Alloc, RelocationStrategy>::nsTArray_base() : mHdr(EmptyHdr()) {
 
 template <class Alloc, class RelocationStrategy>
 nsTArray_base<Alloc, RelocationStrategy>::~nsTArray_base() {
-  if (mHdr != EmptyHdr() && !UsesAutoArrayBuffer()) {
+  if (!HasEmptyHeader() && !UsesAutoArrayBuffer()) {
     Alloc::Free(mHdr);
   }
   MOZ_COUNT_DTOR(nsTArray_base);
@@ -139,7 +139,7 @@ nsTArray_base<Alloc, RelocationStrategy>::EnsureCapacity(size_type aCapacity,
 
   size_t reqSize = sizeof(Header) + aCapacity * aElemSize;
 
-  if (mHdr == EmptyHdr()) {
+  if (HasEmptyHeader()) {
     // Malloc() new data
     Header* header = static_cast<Header*>(ActualAlloc::Malloc(reqSize));
     if (!header) {
@@ -210,7 +210,7 @@ nsTArray_base<Alloc, RelocationStrategy>::EnsureCapacity(size_type aCapacity,
 template <class Alloc, class RelocationStrategy>
 void nsTArray_base<Alloc, RelocationStrategy>::ShrinkCapacity(
     size_type aElemSize, size_t aElemAlign) {
-  if (mHdr == EmptyHdr() || UsesAutoArrayBuffer()) {
+  if (HasEmptyHeader() || UsesAutoArrayBuffer()) {
     return;
   }
 
@@ -254,7 +254,7 @@ void nsTArray_base<Alloc, RelocationStrategy>::ShrinkCapacityToZero(
     size_type aElemSize, size_t aElemAlign) {
   MOZ_ASSERT(mHdr->mLength == 0);
 
-  if (mHdr == EmptyHdr() || UsesAutoArrayBuffer()) {
+  if (HasEmptyHeader() || UsesAutoArrayBuffer()) {
     return;
   }
 
@@ -362,7 +362,7 @@ nsTArray_base<Alloc, RelocationStrategy>::InsertSlotsAt(index_type aIndex,
                                                         size_type aElemSize,
                                                         size_t aElemAlign) {
   if (MOZ_UNLIKELY(aIndex > Length())) {
-    InvalidArrayIndex_CRASH(aIndex, Length());
+    mozilla::detail::InvalidArrayIndex_CRASH(aIndex, Length());
   }
 
   if (!ActualAlloc::Successful(
@@ -395,12 +395,12 @@ template <class Alloc, class RelocationStrategy>
 nsTArray_base<Alloc,
               RelocationStrategy>::IsAutoArrayRestorer::~IsAutoArrayRestorer() {
   // Careful: We don't want to set mIsAutoArray = 1 on sEmptyTArrayHeader.
-  if (mIsAuto && mArray.mHdr == mArray.EmptyHdr()) {
+  if (mIsAuto && mArray.HasEmptyHeader()) {
     // Call GetAutoArrayBufferUnsafe() because GetAutoArrayBuffer() asserts
     // that mHdr->mIsAutoArray is true, which surely isn't the case here.
     mArray.mHdr = mArray.GetAutoArrayBufferUnsafe(mElemAlign);
     mArray.mHdr->mLength = 0;
-  } else if (mArray.mHdr != mArray.EmptyHdr()) {
+  } else if (!mArray.HasEmptyHeader()) {
     mArray.mHdr->mIsAutoArray = mIsAuto;
   }
 }
@@ -492,17 +492,17 @@ nsTArray_base<Alloc, RelocationStrategy>::SwapArrayElements(
       largerElements, temp.Elements(), smallerLength, aElemSize);
 
   // Swap the arrays' lengths.
-  MOZ_ASSERT((aOther.Length() == 0 || mHdr != EmptyHdr()) &&
-                 (Length() == 0 || aOther.mHdr != EmptyHdr()),
+  MOZ_ASSERT((aOther.Length() == 0 || !HasEmptyHeader()) &&
+                 (Length() == 0 || !aOther.HasEmptyHeader()),
              "Don't set sEmptyTArrayHeader's length.");
   size_type tempLength = Length();
 
   // Avoid writing to EmptyHdr, since it can trigger false
   // positives with TSan.
-  if (mHdr != EmptyHdr()) {
+  if (!HasEmptyHeader()) {
     mHdr->mLength = aOther.Length();
   }
-  if (aOther.mHdr != EmptyHdr()) {
+  if (!aOther.HasEmptyHeader()) {
     aOther.mHdr->mLength = tempLength;
   }
 
@@ -557,16 +557,16 @@ void nsTArray_base<Alloc, RelocationStrategy>::MoveInit(
                                                    aOther.Length(), aElemSize);
 
   // Swap the arrays' lengths.
-  MOZ_ASSERT((aOther.Length() == 0 || mHdr != EmptyHdr()) &&
-                 (Length() == 0 || aOther.mHdr != EmptyHdr()),
+  MOZ_ASSERT((aOther.Length() == 0 || !HasEmptyHeader()) &&
+                 (Length() == 0 || !aOther.HasEmptyHeader()),
              "Don't set sEmptyTArrayHeader's length.");
 
   // Avoid writing to EmptyHdr, since it can trigger false
   // positives with TSan.
-  if (mHdr != EmptyHdr()) {
+  if (!HasEmptyHeader()) {
     mHdr->mLength = aOther.Length();
   }
-  if (aOther.mHdr != EmptyHdr()) {
+  if (!aOther.HasEmptyHeader()) {
     aOther.mHdr->mLength = 0;
   }
 }
@@ -599,7 +599,7 @@ void nsTArray_base<Alloc, RelocationStrategy>::MoveConstructNonAutoArray(
   mHdr = aOther.mHdr;
   // We might write to mHdr, so ensure it's not the static empty header. aOther
   // shouldn't have been empty if we get here anyway.
-  MOZ_ASSERT(EmptyHdr() != mHdr);
+  MOZ_ASSERT(!HasEmptyHeader());
 
   if (otherIsAuto) {
     mHdr->mIsAutoArray = false;
