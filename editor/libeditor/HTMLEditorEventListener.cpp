@@ -347,7 +347,7 @@ nsresult HTMLEditorEventListener::MouseDown(MouseEvent* aMouseEvent) {
         if (isContextClick) {
           // Set the selection to the point under the mouse cursor:
           DebugOnly<nsresult> rvIgnored =
-              selection->Collapse(parentContent, offset);
+              selection->CollapseInLimiter(parentContent, offset);
           NS_WARNING_ASSERTION(NS_SUCCEEDED(rvIgnored),
                                "Selection::Collapse() failed, but ignored");
         } else {
@@ -365,7 +365,7 @@ nsresult HTMLEditorEventListener::MouseDown(MouseEvent* aMouseEvent) {
         if (isContextClick &&
             !HTMLEditUtils::IsImage(originalEventTargetContent)) {
           DebugOnly<nsresult> rvIgnored =
-              selection->Collapse(parentContent, offset);
+              selection->CollapseInLimiter(parentContent, offset);
           NS_WARNING_ASSERTION(NS_SUCCEEDED(rvIgnored),
                                "Selection::Collapse() failed, but ignored");
         } else {

@@ -6,9 +6,14 @@
 #define HTMLEditorEventListener_h
 
 #include "EditorEventListener.h"
+#include "mozilla/HTMLEditor.h"
 #include "nscore.h"
 
 namespace mozilla {
+
+namespace dom {
+class Element;
+}
 
 class EditorBase;
 

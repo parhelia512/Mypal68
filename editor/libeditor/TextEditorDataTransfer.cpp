@@ -103,11 +103,12 @@ nsresult TextEditor::PrepareToInsertContent(
   }
 
   IgnoredErrorResult error;
-  SelectionRefPtr()->Collapse(pointToInsert, error);
+  MOZ_KnownLive(SelectionRefPtr())->CollapseInLimiter(pointToInsert, error);
   if (NS_WARN_IF(Destroyed())) {
     return NS_ERROR_EDITOR_DESTROYED;
   }
-  NS_WARNING_ASSERTION(!error.Failed(), "Selection::Collapse() failed");
+  NS_WARNING_ASSERTION(!error.Failed(),
+                       "Selection::CollapseInLimiter() failed");
   return error.StealNSResult();
 }
 
@@ -233,7 +234,7 @@ nsresult TextEditor::OnDrop(DragEvent* aDropEvent) {
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  uint32_t numItems = dataTransfer->MozItemCount();
+  const uint32_t numItems = dataTransfer->MozItemCount();
   if (NS_WARN_IF(!numItems)) {
     return NS_ERROR_FAILURE;  // Nothing to drop?
   }
@@ -421,8 +422,8 @@ nsresult TextEditor::OnDrop(DragEvent* aDropEvent) {
   // Then, move focus if necessary.  This must cause dispatching "blur" event
   // and "focus" event.
   if (newFocusedElement && focusedElement != newFocusedElement) {
-    DebugOnly<nsresult> rvIgnored =
-        nsFocusManager::GetFocusManager()->SetFocus(newFocusedElement, 0);
+    RefPtr<nsFocusManager> fm = nsFocusManager::GetFocusManager();
+    DebugOnly<nsresult> rvIgnored = fm->SetFocus(newFocusedElement, 0);
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rvIgnored),
                          "nsFocusManager::SetFocus() failed to set focus "
                          "to the element, but ignored");
@@ -586,8 +587,13 @@ nsresult TextEditor::PasteAsAction(int32_t aClipboardType,
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  if (aDispatchPasteEvent && !FireClipboardEvent(ePaste, aClipboardType)) {
-    return EditorBase::ToGenericNSResult(NS_ERROR_EDITOR_ACTION_CANCELED);
+  if (aDispatchPasteEvent) {
+    if (!FireClipboardEvent(ePaste, aClipboardType)) {
+      return EditorBase::ToGenericNSResult(NS_ERROR_EDITOR_ACTION_CANCELED);
+    }
+  } else {
+    // The caller must already have dispatched a "paste" event.
+    editActionData.NotifyOfDispatchingClipboardEvent();
   }
 
   if (AsHTMLEditor()) {
@@ -674,10 +680,7 @@ nsresult TextEditor::PasteTransferableAsAction(nsITransferable* aTransferable,
 }
 
 bool TextEditor::CanPaste(int32_t aClipboardType) const {
-  // Always enable the paste command when inside of a HTML or XHTML document,
-  // but if the document is chrome, let it control it.
-  RefPtr<Document> doc = GetDocument();
-  if (doc && doc->IsHTMLOrXHTML() && !nsContentUtils::IsChromeDoc(doc)) {
+  if (AreClipboardCommandsUnconditionallyEnabled()) {
     return true;
   }
 
@@ -725,7 +728,7 @@ bool TextEditor::CanPasteTransferable(nsITransferable* aTransferable) {
   return NS_SUCCEEDED(rv) && data;
 }
 
-bool TextEditor::IsSafeToInsertData(Document* aSourceDoc) {
+bool TextEditor::IsSafeToInsertData(const Document* aSourceDoc) const {
   // Try to determine whether we should use a sanitizing fragment sink
   bool isSafe = false;
 

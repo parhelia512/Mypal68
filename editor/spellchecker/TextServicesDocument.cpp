@@ -1187,8 +1187,9 @@ nsresult TextServicesDocument::InsertText(const nsAString& aText) {
       return rv;
     }
 
-    rv = selection->Collapse(itEntry->mNode,
-                             itEntry->mNodeOffset + itEntry->mLength);
+    RefPtr<nsINode> node = itEntry->mNode;
+    rv = selection->CollapseInLimiter(node,
+                                      itEntry->mNodeOffset + itEntry->mLength);
 
     if (NS_FAILED(rv)) {
       return rv;
@@ -1756,7 +1757,7 @@ nsresult TextServicesDocument::SetSelectionInternal(int32_t aOffset,
 
   if (!aLength) {
     if (aDoUpdate) {
-      nsresult rv = selection->Collapse(startNode, startNodeOffset);
+      nsresult rv = selection->CollapseInLimiter(startNode, startNodeOffset);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
@@ -1800,7 +1801,7 @@ nsresult TextServicesDocument::SetSelectionInternal(int32_t aOffset,
   }
 
   if (!endNode) {
-    nsresult rv = selection->Collapse(startNode, startNodeOffset);
+    nsresult rv = selection->CollapseInLimiter(startNode, startNodeOffset);
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to collapse selection");
     return rv;
   }
@@ -2781,12 +2782,10 @@ nsresult TextServicesDocument::FindWordBounds(
 
   const char16_t* str = aBlockStr->get();
   uint32_t strLen = aBlockStr->Length();
+  MOZ_ASSERT(strOffset <= strLen,
+             "The string offset shouldn't be greater than the string length!");
 
-  mozilla::intl::WordBreaker* wordBreaker = nsContentUtils::WordBreaker();
-  mozilla::intl::WordRange res = wordBreaker->FindWord(str, strLen, strOffset);
-  if (res.mBegin > strLen) {
-    return str ? NS_ERROR_ILLEGAL_VALUE : NS_ERROR_NULL_POINTER;
-  }
+  mozilla::intl::WordRange res = intl::WordBreaker::FindWord(str, strLen, strOffset);
 
   // Strip out the NBSPs at the ends
   while (res.mBegin <= res.mEnd && IS_NBSP_CHAR(str[res.mBegin])) {
@@ -2873,22 +2872,11 @@ nsresult TextServicesDocument::FindWordBounds(
  */
 
 NS_IMETHODIMP
-TextServicesDocument::DidInsertNode(nsINode* aNode, nsresult aResult) {
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 TextServicesDocument::DidDeleteNode(nsINode* aChild, nsresult aResult) {
   if (NS_WARN_IF(NS_FAILED(aResult))) {
     return NS_OK;
   }
   DidDeleteNode(aChild);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-TextServicesDocument::DidSplitNode(nsINode* aExistingRightNode,
-                                   nsINode* aNewLeftNode) {
   return NS_OK;
 }
 
@@ -2906,12 +2894,6 @@ TextServicesDocument::DidJoinNodes(nsINode* aLeftNode, nsINode* aRightNode,
 }
 
 NS_IMETHODIMP
-TextServicesDocument::DidCreateNode(const nsAString& aTag, nsINode* aNewNode,
-                                    nsresult aResult) {
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 TextServicesDocument::DidInsertText(CharacterData* aTextNode, int32_t aOffset,
                                     const nsAString& aString,
                                     nsresult aResult) {
@@ -2925,18 +2907,8 @@ TextServicesDocument::WillDeleteText(CharacterData* aTextNode, int32_t aOffset,
 }
 
 NS_IMETHODIMP
-TextServicesDocument::DidDeleteText(CharacterData* aTextNode, int32_t aOffset,
-                                    int32_t aLength, nsresult aResult) {
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-TextServicesDocument::WillDeleteSelection(Selection* aSelection) {
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-TextServicesDocument::DidDeleteSelection(Selection* aSelection) {
+TextServicesDocument::WillDeleteRanges(
+    const nsTArray<RefPtr<nsRange>>& aRangesToDelete) {
   return NS_OK;
 }
 

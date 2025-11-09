@@ -32,6 +32,7 @@
 #include "nsTArray.h"
 
 class nsDocumentFragment;
+class nsFrameSelection;
 class nsHTMLDocument;
 class nsITransferable;
 class nsIClipboard;
@@ -57,7 +58,7 @@ class Runnable;
 class SplitNodeTransaction;
 class SplitRangeOffFromNodeResult;
 class SplitRangeOffResult;
-class WSRunObject;
+class WhiteSpaceVisibilityKeeper;
 class WSRunScanner;
 class WSScanResult;
 enum class EditSubAction : int32_t;
@@ -132,8 +133,6 @@ class HTMLEditor final : public TextEditor,
 
   HTMLEditor();
 
-  nsHTMLDocument* GetHTMLDocument() const;
-
   MOZ_CAN_RUN_SCRIPT virtual void PreDestroy(bool aDestroyingFrames) override;
 
   bool GetReturnInParagraphCreatesNewParagraph();
@@ -144,7 +143,7 @@ class HTMLEditor final : public TextEditor,
                                            uint32_t aFlags,
                                            const nsAString& aValue) override;
   MOZ_CAN_RUN_SCRIPT_BOUNDARY NS_IMETHOD BeginningOfDocument() override;
-  NS_IMETHOD SetFlags(uint32_t aFlags) override;
+  MOZ_CAN_RUN_SCRIPT NS_IMETHOD SetFlags(uint32_t aFlags) override;
 
   /**
    * IsEmpty() checks whether the editor is empty.  If editor has only padding
@@ -695,21 +694,12 @@ class HTMLEditor final : public TextEditor,
                                                         uint32_t aLength);
 
   /**
-   * DeleteParentBlocksIfEmpty() removes parent block elements if they
-   * don't have visible contents.  Note that due performance issue of
-   * WSRunObject, this call may be expensive.  And also note that this
-   * removes a empty block with a transaction.  So, please make sure that
-   * you've already created `AutoPlaceholderBatch`.
-   *
-   * @param aPoint      The point whether this method climbing up the DOM
-   *                    tree to remove empty parent blocks.
-   * @return            NS_OK if one or more empty block parents are deleted.
-   *                    NS_SUCCESS_EDITOR_ELEMENT_NOT_FOUND if the point is
-   *                    not in empty block.
-   *                    Or NS_ERROR_* if something unexpected occurs.
+   * ReplaceTextWithTransaction() replaces text in the range with
+   * aStringToInsert.
    */
-  [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult
-  DeleteParentBlocksWithTransactionIfEmpty(const EditorDOMPoint& aPoint);
+  [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult ReplaceTextWithTransaction(
+      dom::Text& aTextNode, uint32_t aOffset, uint32_t aLength,
+      const nsAString& aStringToInsert);
 
   /**
    * InsertTextWithTransaction() inserts aStringToInsert at aPointToInsert.
@@ -768,51 +758,6 @@ class HTMLEditor final : public TextEditor,
   Element* GetSelectionContainerElement() const;
 
   /**
-   * GetFirstSelectedTableCellElement() returns a <td> or <th> element if
-   * first range of Selection (i.e., result of Selection::GetRangeAt(0))
-   * selects a <td> element or <th> element.  Even if Selection is in
-   * a cell element, this returns nullptr.  And even if 2nd or later
-   * range of Selection selects a cell element, also returns nullptr.
-   * Note that when this looks for a cell element, this resets the internal
-   * index of ranges of Selection.  When you call
-   * GetNextSelectedTableCellElement() after a call of this, it'll return 2nd
-   * selected cell if there is.
-   *
-   * @param aRv                 Returns error if there is no selection or
-   *                            first range of Selection is unexpected.
-   * @return                    A <td> or <th> element is selected by first
-   *                            range of Selection.  Note that the range must
-   *                            be: startContaienr and endContainer are same
-   *                            <tr> element, startOffset + 1 equals endOffset.
-   */
-  already_AddRefed<Element> GetFirstSelectedTableCellElement(
-      ErrorResult& aRv) const;
-
-  /**
-   * GetNextSelectedTableCellElement() is a stateful method to retrieve
-   * selected table cell elements which are selected by 2nd or later ranges
-   * of Selection.  When you call GetFirstSelectedTableCellElement(), it
-   * resets internal counter of this method.  Then, following calls of
-   * GetNextSelectedTableCellElement() scans the remaining ranges of Selection.
-   * If a range selects a <td> or <th> element, returns the cell element.
-   * If a range selects an element but neither <td> nor <th> element, this
-   * ignores the range.  If a range is in a text node, returns null without
-   * throwing exception, but stops scanning the remaining ranges even you
-   * call this again.
-   * Note that this may cross <table> boundaries since this method just
-   * scans all ranges of Selection.  Therefore, returning cells which
-   * belong to different <table> elements.
-   *
-   * @param aRv                 Returns error if Selection doesn't have
-   *                            range properly.
-   * @return                    A <td> or <th> element if one of remaining
-   *                            ranges selects a <td> or <th> element unless
-   *                            this does not meet a range in a text node.
-   */
-  already_AddRefed<Element> GetNextSelectedTableCellElement(
-      ErrorResult& aRv) const;
-
-  /**
    * DeleteTableCellContentsWithTransaction() removes any contents in cell
    * elements.  If two or more cell elements are selected, this removes
    * all selected cells' contents.  Otherwise, this removes contents of
@@ -821,11 +766,11 @@ class HTMLEditor final : public TextEditor,
    */
   MOZ_CAN_RUN_SCRIPT nsresult DeleteTableCellContentsWithTransaction();
 
-  static void IsNextCharInNodeWhitespace(nsIContent* aContent, int32_t aOffset,
+  static void IsNextCharInNodeWhiteSpace(nsIContent* aContent, int32_t aOffset,
                                          bool* outIsSpace, bool* outIsNBSP,
                                          nsIContent** outNode = nullptr,
                                          int32_t* outOffset = 0);
-  static void IsPrevCharInNodeWhitespace(nsIContent* aContent, int32_t aOffset,
+  static void IsPrevCharInNodeWhiteSpace(nsIContent* aContent, int32_t aOffset,
                                          bool* outIsSpace, bool* outIsNBSP,
                                          nsIContent** outNode = nullptr,
                                          int32_t* outOffset = 0);
@@ -863,7 +808,7 @@ class HTMLEditor final : public TextEditor,
 
   /**
    * IsVisibleTextNode() returns true if aText has visible text.  If it has
-   * only whitespaces and they are collapsed, returns false.
+   * only white-spaces and they are collapsed, returns false.
    */
   bool IsVisibleTextNode(Text& aText) const;
 
@@ -921,7 +866,7 @@ class HTMLEditor final : public TextEditor,
   /**
    * Small utility routine to test if a break node is visible to user.
    */
-  bool IsVisibleBRElement(const nsINode* aNode);
+  bool IsVisibleBRElement(const nsINode* aNode) const;
 
   /**
    * Helper routines for font size changing.
@@ -976,23 +921,23 @@ class HTMLEditor final : public TextEditor,
   /**
    * GetPriorHTMLSibling() returns the previous editable sibling, if there is
    * one within the parent, optionally skipping text nodes that are only
-   * whitespace.
+   * white-space.
    */
-  enum class SkipWhitespace { Yes, No };
+  enum class SkipWhiteSpace { Yes, No };
   nsIContent* GetPriorHTMLSibling(nsINode* aNode,
-                                  SkipWhitespace = SkipWhitespace::No) const;
+                                  SkipWhiteSpace = SkipWhiteSpace::No) const;
 
   /**
    * GetNextHTMLSibling() returns the next editable sibling, if there is
    * one within the parent, optionally skipping text nodes that are only
-   * whitespace.
+   * white-space.
    */
   nsIContent* GetNextHTMLSibling(nsINode* aNode,
-                                 SkipWhitespace = SkipWhitespace::No) const;
+                                 SkipWhiteSpace = SkipWhiteSpace::No) const;
 
   // Helper for GetPriorHTMLSibling/GetNextHTMLSibling.
-  static bool SkippableWhitespace(nsINode* aNode, SkipWhitespace aSkipWS) {
-    return aSkipWS == SkipWhitespace::Yes && aNode->IsText() &&
+  static bool SkippableWhiteSpace(nsINode* aNode, SkipWhiteSpace aSkipWS) {
+    return aSkipWS == SkipWhiteSpace::Yes && aNode->IsText() &&
            aNode->AsText()->TextIsOnlyWhitespace();
   }
 
@@ -1442,9 +1387,9 @@ class HTMLEditor final : public TextEditor,
       CollectNonEditableNodes aCollectNonEditableNodes);
 
   /**
-   * GetWhiteSpaceEndPoint() returns point at first or last ASCII whitespace
+   * GetWhiteSpaceEndPoint() returns point at first or last ASCII white-space
    * or non-breakable space starting from aPoint.  I.e., this returns next or
-   * previous point whether the character is neither ASCII whitespace nor
+   * previous point whether the character is neither ASCII white-space nor
    * non-brekable space.
    */
   enum class ScanDirection { Backward, Forward };
@@ -1462,7 +1407,8 @@ class HTMLEditor final : public TextEditor,
    */
   template <typename PT, typename RT>
   EditorDOMPoint GetCurrentHardLineStartPoint(
-      const RangeBoundaryBase<PT, RT>& aPoint, EditSubAction aEditSubAction);
+      const RangeBoundaryBase<PT, RT>& aPoint,
+      EditSubAction aEditSubAction) const;
 
   /**
    * GetCurrentHardLineEndPoint() returns end point of hard line including
@@ -1476,12 +1422,12 @@ class HTMLEditor final : public TextEditor,
    */
   template <typename PT, typename RT>
   EditorDOMPoint GetCurrentHardLineEndPoint(
-      const RangeBoundaryBase<PT, RT>& aPoint);
+      const RangeBoundaryBase<PT, RT>& aPoint) const;
 
   /**
    * CreateRangeIncludingAdjuscentWhiteSpaces() creates an nsRange instance
    * which may be expanded from the given range to include adjuscent
-   * whitespaces.  If this fails handling something, returns nullptr.
+   * white-spaces.  If this fails handling something, returns nullptr.
    */
   already_AddRefed<nsRange> CreateRangeIncludingAdjuscentWhiteSpaces(
       const dom::AbstractRange& aAbstractRange);
@@ -1492,7 +1438,7 @@ class HTMLEditor final : public TextEditor,
 
   /**
    * GetSelectionRangesExtendedToIncludeAdjuscentWhiteSpaces() collects
-   * selection ranges with extending to include adjuscent whitespaces
+   * selection ranges with extending to include adjuscent white-spaces
    * of each range start and end.
    *
    * @param aOutArrayOfRanges   [out] Always appended same number of ranges
@@ -1508,11 +1454,13 @@ class HTMLEditor final : public TextEditor,
    * range.  If this fails handling something, returns nullptr.
    */
   already_AddRefed<nsRange> CreateRangeExtendedToHardLineStartAndEnd(
-      const dom::AbstractRange& aAbstractRange, EditSubAction aEditSubAction);
+      const dom::AbstractRange& aAbstractRange,
+      EditSubAction aEditSubAction) const;
   template <typename SPT, typename SRT, typename EPT, typename ERT>
   already_AddRefed<nsRange> CreateRangeExtendedToHardLineStartAndEnd(
       const RangeBoundaryBase<SPT, SRT>& aStartRef,
-      const RangeBoundaryBase<EPT, ERT>& aEndRef, EditSubAction aEditSubAction);
+      const RangeBoundaryBase<EPT, ERT>& aEndRef,
+      EditSubAction aEditSubAction) const;
 
   /**
    * GetSelectionRangesExtendedToHardLineStartAndEnd() collects selection ranges
@@ -1619,7 +1567,7 @@ class HTMLEditor final : public TextEditor,
   template <typename SPT, typename SRT, typename EPT, typename ERT>
   void SelectBRElementIfCollapsedInEmptyBlock(
       RangeBoundaryBase<SPT, SRT>& aStartRef,
-      RangeBoundaryBase<EPT, ERT>& aEndRef);
+      RangeBoundaryBase<EPT, ERT>& aEndRef) const;
 
   /**
    * GetChildNodesOf() returns all child nodes of aParent with an array.
@@ -2008,18 +1956,28 @@ class HTMLEditor final : public TextEditor,
       SelectAllOfCurrentList aSelectAllOfCurrentList);
 
   /**
-   * If aContent is a text node that contains only collapsed whitespace or empty
-   * and editable.
+   * DeleteTextAndTextNodesWithTransaction() removes text or text nodes in
+   * the given range.
    */
+  enum class TreatEmptyTextNodes {
+    // KeepIfContainerOfRangeBoundaries:
+    //   Will remove empty text nodes middle of the range, but keep empty
+    //   text nodes which are containers of range boundaries.
+    KeepIfContainerOfRangeBoundaries,
+    // Remove:
+    //   Will remove all empty text nodes.
+    Remove,
+    // RemoveAllEmptyInlineAncestors:
+    //   Will remove all empty text nodes and its inline ancestors which
+    //   become empty due to removing empty text nodes.
+    RemoveAllEmptyInlineAncestors,
+  };
+  template <typename EditorDOMPointType>
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult
-  DeleteNodeIfInvisibleAndEditableTextNode(nsIContent& aContent);
-
-  /**
-   * If aPoint follows invisible `<br>` element, returns the invisible `<br>`
-   * element.  Otherwise, nullptr.
-   */
-  template <typename PT, typename CT>
-  Element* GetInvisibleBRElementAt(const EditorDOMPointBase<PT, CT>& aPoint);
+  DeleteTextAndTextNodesWithTransaction(
+      const EditorDOMPointType& aStartPoint,
+      const EditorDOMPointType& aEndPoint,
+      TreatEmptyTextNodes aTreatEmptyTextNodes);
 
   /**
    * JoinNodesWithTransaction() joins aLeftNode and aRightNode.  Content of
@@ -2198,6 +2156,15 @@ class HTMLEditor final : public TextEditor,
                                     const EditorDOMPoint& aPointToInsert);
 
   /**
+   * CanMoveNodeOrChildren() returns true if
+   * `MoveNodeOrChildrenWithTransaction()` can move or delete at least a
+   * descendant of aElement into aNewContainer.  I.e., when this returns true,
+   * `MoveNodeOrChildrenWithTransaction()` must return "handled".
+   */
+  Result<bool, nsresult> CanMoveNodeOrChildren(
+      const nsIContent& aContent, const nsINode& aNewContainer) const;
+
+  /**
    * MoveChildrenWithTransaction() moves the children of aElement to
    * aPointToInsert.  If cannot insert some children due to invalid relation,
    * calls MoveNodeOrChildrenWithTransaction() to remove the children but keep
@@ -2210,6 +2177,14 @@ class HTMLEditor final : public TextEditor,
    */
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT MoveNodeResult MoveChildrenWithTransaction(
       Element& aElement, const EditorDOMPoint& aPointToInsert);
+
+  /**
+   * CanMoveChildren() returns true if `MoveChildrenWithTransaction()` can move
+   * at least a descendant of aElement into aNewContainer.  I.e., when this
+   * returns true, `MoveChildrenWithTransaction()` return "handled".
+   */
+  Result<bool, nsresult> CanMoveChildren(const Element& aElement,
+                                         const nsINode& aNewContainer) const;
 
   /**
    * MoveAllChildren() moves all children of aContainer to before
@@ -2290,6 +2265,18 @@ class HTMLEditor final : public TextEditor,
       MoveToEndOfContainer aMoveToEndOfContainer = MoveToEndOfContainer::No);
 
   /**
+   * CanMoveOrDeleteSomethingInHardLine() returns true if there are some content
+   * nodes which can be moved to another place or deleted.  Note that if there
+   * is only a padding `<br>` element in empty block element, this returns
+   * false even though it may be deleted.
+   *
+   * @param aPointInHardLine    A point in a hard line.
+   */
+  template <typename PT, typename CT>
+  Result<bool, nsresult> CanMoveOrDeleteSomethingInHardLine(
+      const EditorDOMPointBase<PT, CT>& aPointInHardLine) const;
+
+  /**
    * SplitNodeWithTransaction() creates a transaction to create a new node
    * (left node) identical to an existing node (right node), and split the
    * contents between the same point in both nodes, then, execute the
@@ -2340,44 +2327,6 @@ class HTMLEditor final : public TextEditor,
                                SplitAtEdges aSplitAtEdges);
 
   /**
-   * JoinNodesDeepWithTransaction() joins aLeftNode and aRightNode "deeply".
-   * First, they are joined simply, then, new right node is assumed as the
-   * child at length of the left node before joined and new left node is
-   * assumed as its previous sibling.  Then, they will be joined again.
-   * And then, these steps are repeated.
-   *
-   * @param aLeftContent    The node which will be removed form the tree.
-   * @param aRightContent   The node which will be inserted the contents of
-   *                        aRightContent.
-   * @return                The point of the first child of the last right node.
-   *                        The result is always set if this succeeded.
-   */
-  MOZ_CAN_RUN_SCRIPT Result<EditorDOMPoint, nsresult>
-  JoinNodesDeepWithTransaction(nsIContent& aLeftContent,
-                               nsIContent& aRightContent);
-
-  /**
-   * TryToJoinBlocksWithTransaction() tries to join two block elements.  The
-   * right element is always joined to the left element.  If the elements are
-   * the same type and not nested within each other,
-   * JoinEditableNodesWithTransaction() is called (example, joining two list
-   * items together into one).  If the elements are not the same type, or one
-   * is a descendant of the other, we instead destroy the right block placing
-   * its children into leftblock.
-   *
-   * @return            Sets canceled to true if the operation should do
-   *                    nothing anymore even if this doesn't join the blocks.
-   *                    Sets handled to true if this actually handles the
-   *                    request.  Note that this may set it to true even if this
-   *                    does not join the block.  E.g., if the blocks shouldn't
-   *                    be joined or it's impossible to join them but it's not
-   *                    unexpected case, this returns true with this.
-   */
-  [[nodiscard]] MOZ_CAN_RUN_SCRIPT EditActionResult
-  TryToJoinBlocksWithTransaction(nsIContent& aLeftContentInBlock,
-                                 nsIContent& aRightContentInBlock);
-
-  /**
    * GetGoodCaretPointFor() returns a good point to collapse `Selection`
    * after handling edit action with aDirectionAndAmount.
    *
@@ -2388,7 +2337,7 @@ class HTMLEditor final : public TextEditor,
    *                            Set the direction of handled edit action.
    */
   EditorDOMPoint GetGoodCaretPointFor(
-      nsIContent& aContent, nsIEditor::EDirection aDirectionAndAmount);
+      nsIContent& aContent, nsIEditor::EDirection aDirectionAndAmount) const;
 
   /**
    * RemoveEmptyInclusiveAncestorInlineElements() removes empty inclusive
@@ -2400,212 +2349,194 @@ class HTMLEditor final : public TextEditor,
   RemoveEmptyInclusiveAncestorInlineElements(nsIContent& aContent);
 
   /**
-   * MaybeDeleteTopMostEmptyAncestor() looks for top most empty block ancestor
-   * of aStartContent in aEditingHostElement.
-   * If found empty ancestor is a list item element, inserts a <br> element
-   * before its parent element if grand parent is a list element.  Then,
-   * collapse Selection to after the empty block.
-   * If found empty ancestor is not a list item element, collapse Selection to
-   * somewhere depending on aAction.
-   * Finally, removes the empty block ancestor.
-   *
-   * @param aStartContent       Start content to look for empty ancestors.
-   * @param aEditingHostElement Current editing host.
-   * @param aDirectionAndAmount If found empty ancestor block is a list item
-   *                            element, this is ignored.  Otherwise:
-   *                            - If eNext, eNextWord or eToEndOfLine, collapse
-   *                              Selection to after found empty ancestor.
-   *                            - If ePrevious, ePreviousWord or
-   *                              eToBeginningOfLine, collapse Selection to
-   *                              end of previous editable node.
-   *                            Otherwise, eNone is allowed but does nothing.
+   * DeleteTextAndNormalizeSurroundingWhiteSpaces() deletes text between
+   * aStartToDelete and immediately before aEndToDelete and return new caret
+   * position.  If surrounding characters are white-spaces, this normalize them
+   * too.  Finally, inserts `<br>` element if it's required.
+   * Note that if you wants only normalizing white-spaces, you can set same
+   * point to both aStartToDelete and aEndToDelete.  Then, this tries to
+   * normalize white-space sequence containing previous character of
+   * aStartToDelete.
    */
-  [[nodiscard]] MOZ_CAN_RUN_SCRIPT EditActionResult
-  MaybeDeleteTopMostEmptyAncestor(nsIContent& aStartContent,
-                                  Element& aEditingHostElement,
-                                  nsIEditor::EDirection aDirectionAndAmount);
+  enum class DeleteDirection {
+    Forward,
+    Backward,
+  };
+  [[nodiscard]] MOZ_CAN_RUN_SCRIPT Result<EditorDOMPoint, nsresult>
+  DeleteTextAndNormalizeSurroundingWhiteSpaces(
+      const EditorDOMPointInText& aStartToDelete,
+      const EditorDOMPointInText& aEndToDelete,
+      TreatEmptyTextNodes aTreatEmptyTextNodes,
+      DeleteDirection aDeleteDirection);
 
   /**
-   * GetRangeExtendedToIncludeInvisibleNodes() returns extended range.
-   * If there are some invisible nodes around aAbstractRange, they may
-   * be included.
+   * ExtendRangeToDeleteWithNormalizingWhiteSpaces() is a helper method of
+   * DeleteTextAndNormalizeSurroundingWhiteSpaces().  This expands
+   * aStartToDelete and/or aEndToDelete if there are white-spaces which need
+   * normalizing.
    *
-   * @param aAbstractRange      Original range.  This must not be collapsed
-   *                            and must be positioned.
-   * @return                    Extended range.
+   * @param aStartToDelete      [In/Out] Start to delete.  If this point
+   *                            follows white-spaces, this may be modified.
+   * @param aEndToDelete        [In/Out] Next point of last content to be
+   *                            deleted.  If this point is a white-space,
+   *                            this may be modified.
+   * @param aNormalizedWhiteSpacesInStartNode
+   *                            [Out] If container text node of aStartToDelete
+   *                            should be modified, this offers new string
+   *                            in the range in the text node.
+   * @param aNormalizedWhiteSpacesInEndNode
+   *                            [Out] If container text node of aEndToDelete
+   *                            is different from the container of
+   *                            aStartToDelete and it should be modified, this
+   *                            offers new string in the range in the text node.
    */
-  already_AddRefed<dom::StaticRange> GetRangeExtendedToIncludeInvisibleNodes(
-      const dom::AbstractRange& aAbstractRange);
+  void ExtendRangeToDeleteWithNormalizingWhiteSpaces(
+      EditorDOMPointInText& aStartToDelete, EditorDOMPointInText& aEndToDelete,
+      nsAString& aNormalizedWhiteSpacesInStartNode,
+      nsAString& aNormalizedWhiteSpacesInEndNode) const;
 
   /**
-   * HandleDeleteCollapsedSelectionAtWhiteSpaces() handles deletion of
-   * collapsed selection at whitespaces in a text node.
-   *
-   * @param aDirectionAndAmount Direction of the deletion.
-   * @param aWSRunObjectAtCaret WSRunObject instance which was initialized with
-   *                            the caret point.
+   * CharPointType let the following helper methods of
+   * ExtendRangeToDeleteWithNormalizingWhiteSpaces() know what type of
+   * character will be previous or next char point after deletion.
    */
-  [[nodiscard]] MOZ_CAN_RUN_SCRIPT EditActionResult
-  HandleDeleteCollapsedSelectionAtWhiteSpaces(
-      nsIEditor::EDirection aDirectionAndAmount,
-      WSRunObject& aWSRunObjectAtCaret);
+  enum class CharPointType {
+    TextEnd,  // Start or end of the text (hardline break or replaced inline
+              // element)
+    ASCIIWhiteSpace,   // One of ASCII white-spaces (collapsible white-space)
+    NoBreakingSpace,   // NBSP
+    VisibleChar,       // Non-white-space characters
+    PreformattedChar,  // Any character (including white-space) in preformatted
+                       // element
+  };
 
   /**
-   * HandleDeleteCollapsedSelectionAtTextNode() handles deletion of
-   * collapsed selection in a text node.
-   *
-   * @param aDirectionAndAmount Direction of the deletion.
-   * @param aPointToDelete      The point in a text node to delete character(s).
-   *                            Caller must guarantee that this is in a text
-   *                            node.
+   * GetPreviousCharPointType() and GetCharPointType() get type of
+   * previous/current char point from current DOM tree.  In other words, if the
+   * point will be deleted, you cannot use these methods.
    */
-  [[nodiscard]] MOZ_CAN_RUN_SCRIPT EditActionResult
-  HandleDeleteCollapsedSelectionAtTextNode(
-      nsIEditor::EDirection aDirectionAndAmount,
-      const EditorDOMPoint& aPointToDelete);
+  template <typename EditorDOMPointType>
+  static CharPointType GetPreviousCharPointType(
+      const EditorDOMPointType& aPoint) {
+    MOZ_ASSERT(aPoint.IsInTextNode());
+    if (aPoint.IsStartOfContainer()) {
+      return CharPointType::TextEnd;
+    }
+    if (EditorUtils::IsContentPreformatted(*aPoint.ContainerAsText())) {
+      return CharPointType::PreformattedChar;
+    }
+    if (aPoint.IsPreviousCharASCIISpace()) {
+      return CharPointType::ASCIIWhiteSpace;
+    }
+    return aPoint.IsPreviousCharNBSP() ? CharPointType::NoBreakingSpace
+                                       : CharPointType::VisibleChar;
+  }
+  template <typename EditorDOMPointType>
+  static CharPointType GetCharPointType(const EditorDOMPointType& aPoint) {
+    MOZ_ASSERT(aPoint.IsInTextNode());
+    if (aPoint.IsEndOfContainer()) {
+      return CharPointType::TextEnd;
+    }
+    if (EditorUtils::IsContentPreformatted(*aPoint.ContainerAsText())) {
+      return CharPointType::PreformattedChar;
+    }
+    if (aPoint.IsCharASCIISpace()) {
+      return CharPointType::ASCIIWhiteSpace;
+    }
+    return aPoint.IsCharNBSP() ? CharPointType::NoBreakingSpace
+                               : CharPointType::VisibleChar;
+  }
 
   /**
-   * HandleDeleteCollapsedSelectionAtAtomicContent() handles deletion of
-   * atomic elements like `<br>`, `<hr>`, `<img>`, `<input>`, etc and
-   * data nodes except text node (e.g., comment node).
-   * If aAtomicContent is a invisible `<br>` element, this will call
-   * `WillDeleteSelection()` recursively after deleting it.
-   *
-   * @param aDirectionAndAmount Direction of the deletion.
-   * @param aStripWrappers      Must be eStrip or eNoStrip.
-   * @param aAtomicContent      The atomic content to be deleted.
-   * @param aCaretPoint         The caret point (i.e., selection start or
-   *                            end).
-   * @param aWSRunScannerAtCaret WSRunScanner instance which was initialized
-   *                             with the caret point.
+   * CharPointData let the following helper methods of
+   * ExtendRangeToDeleteWithNormalizingWhiteSpaces() know what type of
+   * character will be previous or next char point and the point is
+   * in same or different text node after deletion.
    */
-  [[nodiscard]] MOZ_CAN_RUN_SCRIPT EditActionResult
-  HandleDeleteCollapsedSelectionAtAtomicContent(
-      nsIEditor::EDirection aDirectionAndAmount,
-      nsIEditor::EStripWrappers aStripWrappers, nsIContent& aAtomicContent,
-      const EditorDOMPoint& aCaretPoint, WSRunScanner& aWSRunScannerAtCaret);
+  class MOZ_STACK_CLASS CharPointData final {
+   public:
+    static CharPointData InDifferentTextNode(CharPointType aCharPointType) {
+      CharPointData result;
+      result.mIsInDifferentTextNode = true;
+      result.mType = aCharPointType;
+      return result;
+    }
+    static CharPointData InSameTextNode(CharPointType aCharPointType) {
+      CharPointData result;
+      // Let's mark this as in different text node if given one indicates
+      // that there is end of text because it means that adjacent content
+      // from point of text node view is another element.
+      result.mIsInDifferentTextNode = aCharPointType == CharPointType::TextEnd;
+      result.mType = aCharPointType;
+      return result;
+    }
+
+    bool AcrossTextNodeBoundary() const { return mIsInDifferentTextNode; }
+    bool IsWhiteSpace() const {
+      return mType == CharPointType::ASCIIWhiteSpace ||
+             mType == CharPointType::NoBreakingSpace;
+    }
+    CharPointType Type() const { return mType; }
+
+   private:
+    CharPointData() = default;
+
+    CharPointType mType;
+    bool mIsInDifferentTextNode;
+  };
 
   /**
-   * HandleDeleteCollapsedSelectionAtOtherBlockBoundary() handles deletion at
-   * other block boundary (i.e., immediately before or after a block).
-   * If this does not join blocks, `WillDeleteSelection()` may be called
-   * recursively.
-   *
-   * @param aDirectionAndAmount Direction of the deletion.
-   * @param aStripWrappers      Must be eStrip or eNoStrip.
-   * @param aOtherBlockElement  The block element which follows the caret or
-   *                            is followed by caret.
-   * @param aCaretPoint         The caret point (i.e., selection start or
-   *                            end).
-   * @param aWSRunScannerAtCaret WSRunScanner instance which was initialized
-   *                             with the caret point.
+   * GetPreviousCharPointDataForNormalizingWhiteSpaces() and
+   * GetInclusiveNextCharPointDataForNormalizingWhiteSpaces() is helper methods
+   * of ExtendRangeToDeleteWithNormalizingWhiteSpaces().  This retrieves
+   * previous or inclusive next editable char point and returns its data.
    */
-  [[nodiscard]] MOZ_CAN_RUN_SCRIPT EditActionResult
-  HandleDeleteCollapsedSelectionAtOtherBlockBoundary(
-      nsIEditor::EDirection aDirectionAndAmount,
-      nsIEditor::EStripWrappers aStripWrappers, Element& aOtherBlockElement,
-      const EditorDOMPoint& aCaretPoint, WSRunScanner& aWSRunScannerAtCaret);
+  CharPointData GetPreviousCharPointDataForNormalizingWhiteSpaces(
+      const EditorDOMPointInText& aPoint) const;
+  CharPointData GetInclusiveNextCharPointDataForNormalizingWhiteSpaces(
+      const EditorDOMPointInText& aPoint) const;
 
   /**
-   * HandleDeleteCollapsedSelectionAtCurrentBlockBoundary() handles deletion
-   * at current block boundary (i.e., at start or end of current block).
+   * GenerateWhiteSpaceSequence() generates white-space sequence which won't
+   * be collapsed.
    *
-   * @param aDirectionAndAmount         Direction of the deletion.
-   * @param aCurrentBlockElement        The current block element.
-   * @param aCaretPoint                 The caret point (i.e., selection start
-   *                                    or end).
+   * @param aResult             [out] White space sequence which won't be
+   *                            collapsed, but wrapable.
+   * @param aLength             Length of generating white-space sequence.
+   *                            Must be 1 or larger.
+   * @param aPreviousCharPointData
+   *                            Specify the previous char point where it'll be
+   *                            inserted.  Currently, for keepin this method
+   *                            simple, does not support to generate a part
+   *                            of white-space sequence in a text node.  So,
+   *                            if the type is white-space, it must indicate
+   *                            different text nodes white-space.
+   * @param aNextCharPointData  Specify the next char point where it'll be
+   *                            inserted.  Same as aPreviousCharPointData,
+   *                            this must node indidate white-space in same
+   *                            text node.
    */
-  [[nodiscard]] MOZ_CAN_RUN_SCRIPT EditActionResult
-  HandleDeleteCollapsedSelectionAtCurrentBlockBoundary(
-      nsIEditor::EDirection aDirectionAndAmount, Element& aCurrentBlockElement,
-      const EditorDOMPoint& aCaretPoint);
+  static void GenerateWhiteSpaceSequence(
+      nsAString& aResult, uint32_t aLength,
+      const CharPointData& aPreviousCharPointData,
+      const CharPointData& aNextCharPointData);
 
   /**
-   * DeleteUnnecessaryNodesAndCollapseSelection() removes unnecessary nodes
-   * around aSelectionStartPoint and aSelectionEndPoint.  Then, collapse
-   * selection at aSelectionStartPoint or aSelectionEndPoint (depending on
-   * aDirectionAndAmount).
+   * ComputeTargetRanges() computes actual delete ranges which will be deleted
+   * unless the following `beforeinput` event is canceled.
    *
-   * @param aDirectionAndAmount         Direction of the deletion.
-   *                                    If nsIEditor::ePrevious, selection will
-   *                                    be collapsed to aSelectionEndPoint.
-   *                                    Otherwise, selection will be collapsed
-   *                                    to aSelectionStartPoint.
-   * @param aSelectionStartPoint        First selection range start after
-   *                                    computing the deleting range.
-   * @param aSelectionEndPoint          First selection range end after
-   *                                    computing the deleting range.
+   * @param aDirectionAndAmount         The direction and amount of deletion.
+   * @param aRangesToDelete             [In/Out] The ranges to be deleted,
+   *                                    typically, initialized with the
+   *                                    selection ranges.  This may be modified
+   *                                    if selection ranges should be extened.
    */
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult
-  DeleteUnnecessaryNodesAndCollapseSelection(
-      nsIEditor::EDirection aDirectionAndAmount,
-      const EditorDOMPoint& aSelectionStartPoint,
-      const EditorDOMPoint& aSelectionEndPoint);
-
-  /**
-   * HandleDeleteAroundCollapsedSelection() handles deletion with collapsed
-   * `Selection`.  Callers must guarantee that this is called only when
-   * `Selection` is collapsed.
-   *
-   * @param aDirectionAndAmount Direction of the deletion.
-   * @param aStripWrappers      Must be eStrip or eNoStrip.
-   */
-  [[nodiscard]] MOZ_CAN_RUN_SCRIPT EditActionResult
-  HandleDeleteAroundCollapsedSelection(
-      nsIEditor::EDirection aDirectionAndAmount,
-      nsIEditor::EStripWrappers aStripWrappers);
-
-  /**
-   * HandleDeleteNonCollapsedSelection() handles deletion with non-collapsed
-   * `Selection`.  Callers must guarantee that this is called only when
-   * `Selection` is NOT collapsed.
-   *
-   * @param aDirectionAndAmount         Direction of the deletion.
-   * @param aStripWrappers              Must be eStrip or eNoStrip.
-   * @param aSelectionWasCollpased      If the caller extended `Selection`
-   *                                    from collapsed, set this to `Yes`.
-   *                                    Otherwise, i.e., `Selection` is not
-   *                                    collapsed from the beginning, set
-   *                                    this to `No`.
-   */
-  enum class SelectionWasCollapsed { Yes, No };
-  [[nodiscard]] MOZ_CAN_RUN_SCRIPT EditActionResult
-  HandleDeleteNonCollapsedSelection(
-      nsIEditor::EDirection aDirectionAndAmount,
-      nsIEditor::EStripWrappers aStripWrappers,
-      SelectionWasCollapsed aSelectionWasCollapsed);
-
-  /**
-   * DeleteElementsExceptTableRelatedElements() removes elements except
-   * table related elements (except <table> itself) and their contents
-   * from the DOM tree.
-   *
-   * @param aNode               If this is not a table related element, this
-   *                            node will be removed from the DOM tree.
-   *                            Otherwise, this method calls itself recursively
-   *                            with its children.
-   *
-   */
-  [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult
-  DeleteElementsExceptTableRelatedElements(nsINode& aNode);
-
-  /**
-   * HandleDeleteSelectionInternal() is a helper method of
-   * HandleDeleteSelection().  This can be called recursively by the helper
-   * methods.
-   * NOTE: This method creates SelectionBatcher.  Therefore, each caller
-   *       needs to check if the editor is still available even if this returns
-   *       NS_OK.
-   */
-  [[nodiscard]] MOZ_CAN_RUN_SCRIPT EditActionResult
-  HandleDeleteSelectionInternal(nsIEditor::EDirection aDirectionAndAmount,
-                                nsIEditor::EStripWrappers aStripWrappers);
+  ComputeTargetRanges(nsIEditor::EDirection aDirectionAndAmount,
+                      AutoRangeArray& aRangesToDelete);
 
   /**
    * This method handles "delete selection" commands.
-   * NOTE: Don't call this method recursively from the helper methods since
-   *       when nobody handled it without canceling and returing an error,
-   *       this falls it back to `DeleteSelectionWithTransaction()`.
    *
    * @param aDirectionAndAmount Direction of the deletion.
    * @param aStripWrappers      Must be eStrip or eNoStrip.
@@ -2613,6 +2544,8 @@ class HTMLEditor final : public TextEditor,
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT virtual EditActionResult
   HandleDeleteSelection(nsIEditor::EDirection aDirectionAndAmount,
                         nsIEditor::EStripWrappers aStripWrappers) final;
+
+  class AutoDeleteRangesHandler;
 
   /**
    * DeleteMostAncestorMailCiteElementIfEmpty() deletes most ancestor
@@ -3066,7 +2999,7 @@ class HTMLEditor final : public TextEditor,
 
   template <typename PT, typename CT>
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT MOZ_NEVER_INLINE_DEBUG nsresult
-  CollapseSelectionTo(const EditorDOMPointBase<PT, CT>& aPoint) {
+  CollapseSelectionTo(const EditorDOMPointBase<PT, CT>& aPoint) const {
     ErrorResult error;
     CollapseSelectionTo(aPoint, error);
     return error.StealNSResult();
@@ -3074,16 +3007,17 @@ class HTMLEditor final : public TextEditor,
 
   template <typename PT, typename CT>
   MOZ_CAN_RUN_SCRIPT MOZ_NEVER_INLINE_DEBUG void CollapseSelectionTo(
-      const EditorDOMPointBase<PT, CT>& aPoint, ErrorResult& aRv) {
+      const EditorDOMPointBase<PT, CT>& aPoint, ErrorResult& aRv) const {
     MOZ_ASSERT(IsEditActionDataAvailable());
     MOZ_ASSERT(!aRv.Failed());
 
-    SelectionRefPtr()->Collapse(aPoint, aRv);
+    MOZ_KnownLive(SelectionRefPtr())->CollapseInLimiter(aPoint, aRv);
     if (NS_WARN_IF(Destroyed())) {
       aRv = NS_ERROR_EDITOR_DESTROYED;
       return;
     }
-    NS_WARNING_ASSERTION(!aRv.Failed(), "Selection::Collapse() failed");
+    NS_WARNING_ASSERTION(!aRv.Failed(),
+                         "Selection::CollapseInLimiter() failed");
   }
 
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT MOZ_NEVER_INLINE_DEBUG nsresult
@@ -3092,7 +3026,7 @@ class HTMLEditor final : public TextEditor,
   }
 
   MOZ_CAN_RUN_SCRIPT MOZ_NEVER_INLINE_DEBUG void CollapseSelectionToStartOf(
-      nsINode& aNode, ErrorResult& aRv) {
+      nsINode& aNode, ErrorResult& aRv) const {
     CollapseSelectionTo(EditorRawDOMPoint(&aNode, 0), aRv);
   }
 
@@ -3227,7 +3161,6 @@ class HTMLEditor final : public TextEditor,
   Element* GetNextTableRowElement(Element& aTableRowElement,
                                   ErrorResult& aRv) const;
 
-  struct CellAndIndexes;
   struct CellData;
 
   /**
@@ -3295,33 +3228,7 @@ class HTMLEditor final : public TextEditor,
    private:
     CellIndexes() : mRow(-1), mColumn(-1) {}
 
-    friend struct CellAndIndexes;
     friend struct CellData;
-  };
-
-  struct MOZ_STACK_CLASS CellAndIndexes final {
-    RefPtr<Element> mElement;
-    CellIndexes mIndexes;
-
-    /**
-     * This constructor initializes the members with cell element which is
-     * selected by first range of the Selection.  Note that even if the
-     * first range is in the cell element, this does not treat it as the
-     * cell element is selected.
-     */
-    MOZ_CAN_RUN_SCRIPT CellAndIndexes(HTMLEditor& aHTMLEditor,
-                                      Selection& aSelection, ErrorResult& aRv) {
-      Update(aHTMLEditor, aSelection, aRv);
-    }
-
-    /**
-     * Update mElement and mIndexes with cell element which is selected by
-     * first range of the Selection.  Note that even if the first range is
-     * in the cell element, this does not treat it as the cell element is
-     * selected.
-     */
-    MOZ_CAN_RUN_SCRIPT void Update(HTMLEditor& aHTMLEditor,
-                                   Selection& aSelection, ErrorResult& aRv);
   };
 
   struct MOZ_STACK_CLASS CellData final {
@@ -3785,7 +3692,7 @@ class HTMLEditor final : public TextEditor,
   SetHTMLBackgroundColorWithTransaction(const nsAString& aColor);
 
   MOZ_CAN_RUN_SCRIPT_BOUNDARY virtual void InitializeSelectionAncestorLimit(
-      nsIContent& aAncestorLimit) override;
+      nsIContent& aAncestorLimit) const override;
 
   /**
    * Make the given selection span the entire document.
@@ -3826,7 +3733,7 @@ class HTMLEditor final : public TextEditor,
    */
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult
   MaybeCollapseSelectionAtFirstEditableNode(
-      bool aIgnoreIfSelectionInEditingHost);
+      bool aIgnoreIfSelectionInEditingHost) const;
 
   class BlobReader final {
     typedef EditorBase::AutoEditActionDataSetter AutoEditActionDataSetter;
@@ -4169,6 +4076,9 @@ class HTMLEditor final : public TextEditor,
 
   /**
    * InsertObject() inserts given object at aPointToInsert.
+   *
+   * @param aType one of kFileMime, kJPEGImageMime, kJPGImageMime,
+   *              kPNGImageMime, kGIFImageMime.
    */
   MOZ_CAN_RUN_SCRIPT nsresult InsertObject(const nsACString& aType,
                                            nsISupports* aObject, bool aIsSafe,
@@ -4180,7 +4090,10 @@ class HTMLEditor final : public TextEditor,
   // (drag&drop or clipboard)
   virtual nsresult PrepareTransferable(
       nsITransferable** aTransferable) override;
-  nsresult PrepareHTMLTransferable(nsITransferable** aTransferable);
+
+  class HTMLTransferablePreparer;
+  nsresult PrepareHTMLTransferable(nsITransferable** aTransferable) const;
+
   MOZ_CAN_RUN_SCRIPT nsresult InsertFromTransferable(
       nsITransferable* aTransferable, Document* aSourceDoc,
       const nsAString& aContextStr, const nsAString& aInfoStr,
@@ -4189,55 +4102,41 @@ class HTMLEditor final : public TextEditor,
   /**
    * InsertFromDataTransfer() is called only when user drops data into
    * this editor.  Don't use this method for other purposes.
+   *
+   * @param aIndex index of aDataTransfer's item to insert.
    */
-  MOZ_CAN_RUN_SCRIPT nsresult InsertFromDataTransfer(
-      dom::DataTransfer* aDataTransfer, int32_t aIndex, Document* aSourceDoc,
-      const EditorDOMPoint& aDroppedAt, bool aDoDeleteSelection);
+  MOZ_CAN_RUN_SCRIPT nsresult
+  InsertFromDataTransfer(const dom::DataTransfer* aDataTransfer, int32_t aIndex,
+                         Document* aSourceDoc, const EditorDOMPoint& aDroppedAt,
+                         bool aDoDeleteSelection);
 
-  bool HavePrivateHTMLFlavor(nsIClipboard* clipboard);
-  nsresult ParseCFHTML(nsCString& aCfhtml, char16_t** aStuffToPaste,
+  static bool HavePrivateHTMLFlavor(nsIClipboard* clipboard);
+
+  /**
+   * CF_HTML:
+   * <https://docs.microsoft.com/en-us/windows/win32/dataxchg/html-clipboard-format>.
+   *
+   * @param[in]  aCfhtml a CF_HTML string as defined above.
+   * @param[out] aStuffToPaste the fragment, excluding context.
+   * @param[out] aCfcontext the context, excluding the fragment, including a
+   *                        marker (`kInsertionCookie`) indicating where the
+   *                        fragment begins.
+   */
+  nsresult ParseCFHTML(const nsCString& aCfhtml, char16_t** aStuffToPaste,
                        char16_t** aCfcontext);
 
-  nsresult StripFormattingNodes(nsIContent& aNode, bool aOnlyList = false);
-  nsresult CreateDOMFragmentFromPaste(
-      const nsAString& aInputString, const nsAString& aContextStr,
-      const nsAString& aInfoStr, nsCOMPtr<nsINode>* aOutFragNode,
-      nsCOMPtr<nsINode>* aOutStartNode, nsCOMPtr<nsINode>* aOutEndNode,
-      int32_t* aOutStartOffset, int32_t* aOutEndOffset, bool aTrustedInput);
-  nsresult ParseFragment(const nsAString& aStr, nsAtom* aContextLocalName,
-                         Document* aTargetDoc,
-                         dom::DocumentFragment** aFragment, bool aTrustedInput);
   /**
-   * CollectTopMostChildContentsCompletelyInRange() collects topmost child
-   * contents which are completely in the given range.
-   * For example, if the range points a node with its container node, the
-   * result is only the node (meaning does not include its descendants).
-   * If the range starts start of a node and ends end of it, and if the node
-   * does not have children, returns no nodes, otherwise, if the node has
-   * some children, the result includes its all children (not including their
-   * descendants).
-   *
-   * @param aStartPoint         Start point of the range.
-   * @param aEndPoint           End point of the range.
-   * @param aOutArrayOfContents [Out] Topmost children which are completely in
-   *                            the range.
-   */
-  static void CollectTopMostChildNodesCompletelyInRange(
-      const EditorRawDOMPoint& aStartPoint, const EditorRawDOMPoint& aEndPoint,
-      nsTArray<OwningNonNull<nsIContent>>& aOutArrayOfContents);
-
-  /**
-   * AutoHTMLFragmentBoundariesFixer fixes both edges of topmost child nodes
+   * AutoHTMLFragmentBoundariesFixer fixes both edges of topmost child contents
    * which are created with SubtreeContentIterator.
    */
   class MOZ_STACK_CLASS AutoHTMLFragmentBoundariesFixer final {
    public:
     /**
      * @param aArrayOfTopMostChildContents
-     *                         [in/out] The topmost child nodes which will be
+     *                         [in/out] The topmost child contents which will be
      *                         inserted into the DOM tree.  Both edges, i.e.,
      *                         first node and last node in this array will be
-     *                         checked whether they can be insertted into
+     *                         checked whether they can be inserted into
      *                         another DOM tree.  If not, it'll replaces some
      *                         orphan nodes around nodes with proper parent.
      */
@@ -4250,10 +4149,10 @@ class HTMLEditor final : public TextEditor,
      * start or end with proper element node if it's necessary.
      * If first or last node of aArrayOfTopMostChildContents is in list and/or
      * `<table>` element, looks for topmost list element or `<table>` element
-     * with `CollectListAndTableRelatedElementsAt()` and
-     * `GetMostAncestorListOrTableElement()`.  Then, checks whether
-     * some nodes are in aArrayOfTopMostChildContents are the topmost list/table
-     * element or its descendant and if so, removes the nodes from
+     * with `CollectTableAndAnyListElementsOfInclusiveAncestorsAt()` and
+     * `GetMostDistantAncestorListOrTableElement()`.  Then, checks
+     * whether some nodes are in aArrayOfTopMostChildContents are the topmost
+     * list/table element or its descendant and if so, removes the nodes from
      * aArrayOfTopMostChildContents and inserts the list/table element instead.
      * Then, aArrayOfTopMostChildContents won't start/end with list-item nor
      * table cells.
@@ -4265,24 +4164,24 @@ class HTMLEditor final : public TextEditor,
         const;
 
     /**
-     * CollectListAndTableRelatedElementsAt() collects list elements and
-     * table related elements from aNode (meaning aNode may be in the first of
-     * the result) to the root element.
+     * CollectTableAndAnyListElementsOfInclusiveAncestorsAt() collects list
+     * elements and table related elements from the inclusive ancestors
+     * (https://dom.spec.whatwg.org/#concept-tree-inclusive-ancestor) of aNode.
      */
-    void CollectListAndTableRelatedElementsAt(
+    static void CollectTableAndAnyListElementsOfInclusiveAncestorsAt(
         nsIContent& aContent,
-        nsTArray<OwningNonNull<Element>>& aOutArrayOfListAndTableElements)
-        const;
+        nsTArray<OwningNonNull<Element>>& aOutArrayOfListAndTableElements);
 
     /**
-     * GetMostAncestorListOrTableElement() returns a list or a `<table>`
-     * element which is in aArrayOfListAndTableElements and they are
-     * actually valid ancestor of at least one of aArrayOfTopMostChildContents.
+     * GetMostDistantAncestorListOrTableElement() returns a list or a
+     * `<table>` element which is in
+     * aInclusiveAncestorsTableOrListElements and they are actually
+     * valid ancestor of at least one of aArrayOfTopMostChildContents.
      */
-    Element* GetMostAncestorListOrTableElement(
+    static Element* GetMostDistantAncestorListOrTableElement(
         const nsTArray<OwningNonNull<nsIContent>>& aArrayOfTopMostChildContents,
         const nsTArray<OwningNonNull<Element>>&
-            aArrayOfListAndTableRelatedElements) const;
+            aInclusiveAncestorsTableOrListElements);
 
     /**
      * FindReplaceableTableElement() is a helper method of
@@ -4321,7 +4220,8 @@ class HTMLEditor final : public TextEditor,
    *                            different block level element.
    */
   EditorRawDOMPoint GetBetterInsertionPointFor(
-      nsIContent& aContentToInsert, const EditorRawDOMPoint& aPointToInsert);
+      nsIContent& aContentToInsert,
+      const EditorRawDOMPoint& aPointToInsert) const;
 
   /**
    * MakeDefinitionListItemWithTransaction() replaces parent list of current
@@ -4412,6 +4312,8 @@ class HTMLEditor final : public TextEditor,
    * Whether the outer window of the DOM event target has focus or not.
    */
   bool OurWindowHasFocus() const;
+
+  class HTMLWithContextInserter;
 
   /**
    * This function is used to insert a string of HTML input optionally with some
@@ -4520,8 +4422,8 @@ class HTMLEditor final : public TextEditor,
 
   ManualNACPtr CreateResizer(int16_t aLocation, nsIContent& aParentContent);
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult
-  SetAnonymousElementPositionWithTransaction(nsStyledElement& aStyledElement,
-                                             int32_t aX, int32_t aY);
+  SetAnonymousElementPositionWithoutTransaction(nsStyledElement& aStyledElement,
+                                                int32_t aX, int32_t aY);
 
   ManualNACPtr CreateShadow(nsIContent& aParentContent,
                             Element& aOriginalObject);
@@ -4758,11 +4660,6 @@ class HTMLEditor final : public TextEditor,
   bool mCSSAware;
   UniquePtr<CSSEditUtils> mCSSEditUtils;
 
-  // mSelectedCellIndex is reset by GetFirstSelectedTableCellElement(),
-  // then, it'll be referred and incremented by
-  // GetNextSelectedTableCellElement().
-  mutable uint32_t mSelectedCellIndex;
-
   // resizing
   bool mIsObjectResizingEnabled;
   bool mIsResizing;
@@ -4867,7 +4764,7 @@ class HTMLEditor final : public TextEditor,
   friend class SlurpBlobEventListener;
   friend class SplitNodeTransaction;
   friend class TextEditor;
-  friend class WSRunObject;
+  friend class WhiteSpaceVisibilityKeeper;
   friend class WSRunScanner;
   friend class WSScanResult;
 };

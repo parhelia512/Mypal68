@@ -105,6 +105,9 @@ NS_IMETHODIMP InsertNodeTransaction::DoTransaction() {
 
   ErrorResult error;
   container->InsertBefore(contentToInsert, refChild, error);
+  // InsertBefore() may call MightThrowJSException() even if there is no
+  // error. We don't need the flag here.
+  error.WouldReportJSException();
   if (error.Failed()) {
     NS_WARNING("nsINode::InsertBefore() failed");
     return error.StealNSResult();
@@ -137,9 +140,9 @@ NS_IMETHODIMP InsertNodeTransaction::DoTransaction() {
   NS_WARNING_ASSERTION(afterInsertedNode.IsSet(),
                        "Failed to set after the inserted node");
   IgnoredErrorResult ignoredError;
-  selection->Collapse(afterInsertedNode, ignoredError);
+  selection->CollapseInLimiter(afterInsertedNode, ignoredError);
   NS_WARNING_ASSERTION(!ignoredError.Failed(),
-                       "Selection::Collapse() failed, but ignored");
+                       "Selection::CollapseInLimiter() failed, but ignored");
   return NS_OK;
 }
 

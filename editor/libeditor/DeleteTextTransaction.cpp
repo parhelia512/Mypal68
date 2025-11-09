@@ -119,11 +119,8 @@ NS_IMETHODIMP DeleteTextTransaction::DoTransaction() {
     return error.StealNSResult();
   }
 
-  DebugOnly<nsresult> rvIgnored =
-      editorBase->RangeUpdaterRef().SelAdjDeleteText(textNode, mOffset,
-                                                     mLengthToDelete);
-  NS_WARNING_ASSERTION(NS_SUCCEEDED(rvIgnored),
-                       "RangeUpdater::SelAdjDeleteText() failed, but ignored");
+  editorBase->RangeUpdaterRef().SelAdjDeleteText(textNode, mOffset,
+                                                 mLengthToDelete);
 
   if (!editorBase->AllowsTransactionsToChangeSelection()) {
     return NS_OK;
@@ -133,8 +130,9 @@ NS_IMETHODIMP DeleteTextTransaction::DoTransaction() {
   if (NS_WARN_IF(!selection)) {
     return NS_ERROR_FAILURE;
   }
-  selection->Collapse(EditorRawDOMPoint(textNode, mOffset), error);
-  NS_WARNING_ASSERTION(!error.Failed(), "Selection::Collapse() failed");
+  selection->CollapseInLimiter(EditorRawDOMPoint(textNode, mOffset), error);
+  NS_WARNING_ASSERTION(!error.Failed(),
+                       "Selection::CollapseInLimiter() failed");
   return error.StealNSResult();
 }
 

@@ -6,11 +6,18 @@
 #define HTMLEditUtils_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/EditorDOMPoint.h"
+#include "mozilla/EditorUtils.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/dom/AbstractRange.h"
 #include "mozilla/dom/AncestorIterator.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/Selection.h"
+#include "mozilla/dom/Text.h"
+#include "nsCRT.h"
 #include "nsGkAtoms.h"
 #include "nsHTMLTags.h"
+#include "nsTArray.h"
 
 class nsAtom;
 
@@ -23,6 +30,9 @@ class HTMLEditUtils final {
   using Selection = dom::Selection;
 
  public:
+  static const char16_t kSpace = 0x0020;
+  static const char16_t kNBSP = 0x00A0;
+
   /**
    * IsSimplyEditableNode() returns true when aNode is simply editable.
    * This does NOT means that aNode can be removed from current parent nor
@@ -30,6 +40,14 @@ class HTMLEditUtils final {
    */
   static bool IsSimplyEditableNode(const nsINode& aNode) {
     return aNode.IsEditable();
+  }
+
+  /*
+   * IsRemovalNode() returns true when parent of aContent is editable even
+   * if aContent isn't editable.
+   */
+  static bool IsRemovableNode(const nsIContent& aContent) {
+    return aContent.GetParentNode() && aContent.GetParentNode()->IsEditable();
   }
 
   /**
@@ -85,11 +103,11 @@ class HTMLEditUtils final {
   static bool IsListItem(nsINode* aNode);
   static bool IsTable(nsINode* aNode);
   static bool IsTableRow(nsINode* aNode);
-  static bool IsTableElement(nsINode* aNode);
-  static bool IsTableElementButNotTable(nsINode* aNode);
+  static bool IsAnyTableElement(nsINode* aNode);
+  static bool IsAnyTableElementButNotTable(nsINode* aNode);
   static bool IsTableCell(nsINode* node);
   static bool IsTableCellOrCaption(nsINode& aNode);
-  static bool IsList(nsINode* aNode);
+  static bool IsAnyListElement(nsINode* aNode);
   static bool IsPre(nsINode* aNode);
   static bool IsImage(nsINode* aNode);
   static bool IsLink(nsINode* aNode);
@@ -186,6 +204,19 @@ class HTMLEditUtils final {
   }
 
   /**
+   * IsSplittableNode() returns true if aContent can split.
+   */
+  static bool IsSplittableNode(const nsIContent& aContent) {
+    if (aContent.IsElement()) {
+      // XXX Perhaps, instead of using container, we should have "splittable"
+      //     information in the DB.  E.g., `<template>`, `<script>` elements
+      //     can have children, but shouldn't be split.
+      return HTMLEditUtils::IsContainerNode(aContent);
+    }
+    return aContent.IsText() && aContent.Length() > 0;
+  }
+
+  /**
    * See execCommand spec:
    * https://w3c.github.io/editing/execCommand.html#non-list-single-line-container
    * https://w3c.github.io/editing/execCommand.html#single-line-container
@@ -254,8 +285,8 @@ class HTMLEditUtils final {
    *                            aStartContent is not a descendant of this.
    */
   static nsIContent* GetNextLeafContentOrNextBlockElement(
-      nsIContent& aStartContent, nsIContent& aCurrentBlock,
-      Element* aAncestorLimiter = nullptr) {
+      const nsIContent& aStartContent, const nsIContent& aCurrentBlock,
+      const Element* aAncestorLimiter = nullptr) {
     if (&aStartContent == aAncestorLimiter) {
       return nullptr;
     }
@@ -307,8 +338,9 @@ class HTMLEditUtils final {
    */
   template <typename PT, typename CT>
   static nsIContent* GetNextLeafContentOrNextBlockElement(
-      const EditorDOMPointBase<PT, CT>& aStartPoint, nsIContent& aCurrentBlock,
-      Element* aAncestorLimiter = nullptr) {
+      const EditorDOMPointBase<PT, CT>& aStartPoint,
+      const nsIContent& aCurrentBlock,
+      const Element* aAncestorLimiter = nullptr) {
     MOZ_ASSERT(aStartPoint.IsSet());
 
     if (!aStartPoint.IsInContentNode()) {
@@ -366,8 +398,8 @@ class HTMLEditUtils final {
    *                            aStartContent is not a descendant of this.
    */
   static nsIContent* GetPreviousLeafContentOrPreviousBlockElement(
-      nsIContent& aStartContent, nsIContent& aCurrentBlock,
-      Element* aAncestorLimiter = nullptr) {
+      const nsIContent& aStartContent, const nsIContent& aCurrentBlock,
+      const Element* aAncestorLimiter = nullptr) {
     if (&aStartContent == aAncestorLimiter) {
       return nullptr;
     }
@@ -419,8 +451,9 @@ class HTMLEditUtils final {
    */
   template <typename PT, typename CT>
   static nsIContent* GetPreviousLeafContentOrPreviousBlockElement(
-      const EditorDOMPointBase<PT, CT>& aStartPoint, nsIContent& aCurrentBlock,
-      Element* aAncestorLimiter = nullptr) {
+      const EditorDOMPointBase<PT, CT>& aStartPoint,
+      const nsIContent& aCurrentBlock,
+      const Element* aAncestorLimiter = nullptr) {
     MOZ_ASSERT(aStartPoint.IsSet());
 
     if (!aStartPoint.IsInContentNode()) {
@@ -466,6 +499,32 @@ class HTMLEditUtils final {
     // Else return the node itself
     return previousContent;
   }
+
+  /**
+   * Get previous/next editable point from start or end of aContent.
+   */
+  enum class InvisibleWhiteSpaces {
+    Ignore,    // Ignore invisible white-spaces, i.e., don't return middle of
+               // them.
+    Preserve,  // Preserve invisible white-spaces, i.e., result may be start or
+               // end of a text node even if it begins or ends with invisible
+               // white-spaces.
+  };
+  enum class TableBoundary {
+    Ignore,                  // May cross any table element boundary.
+    NoCrossTableElement,     // Won't cross `<table>` element boundary.
+    NoCrossAnyTableElement,  // Won't cross any table element boundary.
+  };
+  template <typename EditorDOMPointType>
+  static EditorDOMPointType GetPreviousEditablePoint(
+      nsIContent& aContent, const Element* aAncestorLimiter,
+      InvisibleWhiteSpaces aInvisibleWhiteSpaces,
+      TableBoundary aHowToTreatTableBoundary);
+  template <typename EditorDOMPointType>
+  static EditorDOMPointType GetNextEditablePoint(
+      nsIContent& aContent, const Element* aAncestorLimiter,
+      InvisibleWhiteSpaces aInvisibleWhiteSpaces,
+      TableBoundary aHowToTreatTableBoundary);
 
   /**
    * GetAncestorBlockElement() returns parent or nearest ancestor of aContent
@@ -519,10 +578,39 @@ class HTMLEditUtils final {
   }
 
   /**
+   * GetInclusiveAncestorBlockElementExceptHRElement() returns inclusive
+   * ancestor block element except `<hr>` element.
+   */
+  static Element* GetInclusiveAncestorBlockElementExceptHRElement(
+      const nsIContent& aContent, const nsINode* aAncestorLimiter = nullptr) {
+    Element* blockElement =
+        GetInclusiveAncestorBlockElement(aContent, aAncestorLimiter);
+    if (!blockElement || !blockElement->IsHTMLElement(nsGkAtoms::hr)) {
+      return blockElement;
+    }
+    if (!blockElement->GetParentElement()) {
+      return nullptr;
+    }
+    return GetInclusiveAncestorBlockElementExceptHRElement(
+        *blockElement->GetParentElement(), aAncestorLimiter);
+  }
+
+  /**
+   * GetInclusiveAncestorEditableBlockElementOrInlineEditingHost() returns
+   * inclusive block ancestor element of aContent.  If aContent is in inline
+   * editing host, returns the editing host instead.
+   */
+  static Element* GetInclusiveAncestorEditableBlockElementOrInlineEditingHost(
+      nsIContent& aContent);
+  /**
    * GetClosestAncestorTableElement() returns the nearest inclusive ancestor
    * <table> element of aContent.
    */
   static Element* GetClosestAncestorTableElement(const nsIContent& aContent) {
+    // TODO: the method name and its documentation clash with the
+    // implementation. Split this method into
+    // `GetClosestAncestorTableElement` and
+    // `GetClosestInclusiveAncestorTableElement`.
     if (!aContent.GetParent()) {
       return nullptr;
     }
@@ -534,13 +622,45 @@ class HTMLEditUtils final {
     return nullptr;
   }
 
+  static Element* GetClosestAncestorAnyListElement(const nsIContent& aContent);
+
+  /**
+   * GetMostDistantAnscestorEditableEmptyInlineElement() returns most distant
+   * ancestor which only has aEmptyContent or its ancestor, editable and
+   * inline element.
+   */
+  static Element* GetMostDistantAnscestorEditableEmptyInlineElement(
+      const nsIContent& aEmptyContent, const Element* aEditingHost = nullptr) {
+    nsIContent* lastEmptyContent = const_cast<nsIContent*>(&aEmptyContent);
+    for (Element* element = aEmptyContent.GetParentElement();
+         element && element != aEditingHost &&
+         HTMLEditUtils::IsInlineElement(*element) &&
+         HTMLEditUtils::IsSimplyEditableNode(*element);
+         element = element->GetParentElement()) {
+      if (element->GetChildCount() > 1) {
+        for (const nsIContent* child = element->GetFirstChild(); child;
+             child = child->GetNextSibling()) {
+          if (child == lastEmptyContent || child->IsComment()) {
+            continue;
+          }
+          return lastEmptyContent != &aEmptyContent
+                     ? lastEmptyContent->AsElement()
+                     : nullptr;
+        }
+      }
+      lastEmptyContent = element;
+    }
+    return lastEmptyContent != &aEmptyContent ? lastEmptyContent->AsElement()
+                                              : nullptr;
+  }
+
   /**
    * GetElementIfOnlyOneSelected() returns an element if aRange selects only
    * the element node (and its descendants).
    */
   static Element* GetElementIfOnlyOneSelected(
       const dom::AbstractRange& aRange) {
-    if (!aRange.IsPositioned()) {
+    if (!aRange.IsPositioned() || aRange.Collapsed()) {
       return nullptr;
     }
     const RangeBoundary& start = aRange.StartRef();
@@ -572,6 +692,35 @@ class HTMLEditUtils final {
     return element && HTMLEditUtils::IsTableCell(element) ? element : nullptr;
   }
 
+  /**
+   * GetFirstSelectedTableCellElement() returns a table cell element (i.e.,
+   * `<td>` or `<th>` if and only if first selection range selects only a
+   * table cell element.
+   */
+  static Element* GetFirstSelectedTableCellElement(
+      const Selection& aSelection) {
+    if (!aSelection.RangeCount()) {
+      return nullptr;
+    }
+    const nsRange* firstRange = aSelection.GetRangeAt(0);
+    if (NS_WARN_IF(!firstRange) || NS_WARN_IF(!firstRange->IsPositioned())) {
+      return nullptr;
+    }
+    return GetTableCellElementIfOnlyOneSelected(*firstRange);
+  }
+
+  /**
+   * IsInTableCellSelectionMode() returns true when Gecko's editor thinks that
+   * selection is in a table cell selection mode.
+   * Note that Gecko's editor traditionally treats selection as in table cell
+   * selection mode when first range selects a table cell element.  I.e., even
+   * if `nsFrameSelection` is not in table cell selection mode, this may return
+   * true.
+   */
+  static bool IsInTableCellSelectionMode(const Selection& aSelection) {
+    return GetFirstSelectedTableCellElement(aSelection) != nullptr;
+  }
+
   static EditAction GetEditActionForInsert(const nsAtom& aTagName);
   static EditAction GetEditActionForRemoveList(const nsAtom& aTagName);
   static EditAction GetEditActionForInsert(const Element& aElement);
@@ -580,9 +729,141 @@ class HTMLEditUtils final {
                                                bool aToSetStyle);
   static EditAction GetEditActionForAlignment(const nsAString& aAlignType);
 
+  /**
+   * GetPreviousCharOffsetExceptASCIIWhiteSpace() returns offset of previous
+   * character which is not ASCII white-space characters.
+   */
+  static Maybe<uint32_t> GetPreviousCharOffsetExceptASCIIWhiteSpaces(
+      const EditorDOMPointInText& aPoint) {
+    MOZ_ASSERT(aPoint.IsSetAndValid());
+    return GetPreviousCharOffsetExceptASCIIWhiteSpaces(
+        *aPoint.ContainerAsText(), aPoint.Offset());
+  }
+  static Maybe<uint32_t> GetPreviousCharOffsetExceptASCIIWhiteSpaces(
+      const dom::Text& aTextNode, uint32_t aOffset) {
+    const nsTextFragment& textFragment = aTextNode.TextFragment();
+    MOZ_ASSERT(aOffset <= textFragment.GetLength());
+    for (uint32_t i = aOffset; i; i--) {
+      if (!nsCRT::IsAsciiSpace(textFragment.CharAt(i - 1))) {
+        return Some(i - 1);
+      }
+    }
+    return Nothing();
+  }
+
+  /**
+   * GetNextCharOffsetExceptASCIIWhiteSpace() returns offset of next character
+   * which is not ASCII white-space characters.
+   */
+  static Maybe<uint32_t> GetNextCharOffsetExceptASCIIWhiteSpaces(
+      const EditorDOMPointInText& aPoint) {
+    MOZ_ASSERT(aPoint.IsSetAndValid());
+    return GetNextCharOffsetExceptASCIIWhiteSpaces(*aPoint.ContainerAsText(),
+                                                   aPoint.Offset());
+  }
+  static Maybe<uint32_t> GetNextCharOffsetExceptASCIIWhiteSpaces(
+      const dom::Text& aTextNode, uint32_t aOffset) {
+    const nsTextFragment& textFragment = aTextNode.TextFragment();
+    MOZ_ASSERT(aOffset <= textFragment.GetLength());
+    for (uint32_t i = aOffset + 1; i < textFragment.GetLength(); i++) {
+      if (!nsCRT::IsAsciiSpace(textFragment.CharAt(i))) {
+        return Some(i);
+      }
+    }
+    return Nothing();
+  }
+
+  /**
+   * GetPreviousCharOffsetExceptWhiteSpaces() returns first offset where
+   * the character is neither an ASCII white-space nor an NBSP before aPoint.
+   */
+  static Maybe<uint32_t> GetPreviousCharOffsetExceptWhiteSpaces(
+      const EditorDOMPointInText& aPoint) {
+    MOZ_ASSERT(aPoint.IsSetAndValid());
+    return GetPreviousCharOffsetExceptWhiteSpaces(*aPoint.ContainerAsText(),
+                                                  aPoint.Offset());
+  }
+  static Maybe<uint32_t> GetPreviousCharOffsetExceptWhiteSpaces(
+      const dom::Text& aTextNode, uint32_t aOffset) {
+    if (!aOffset) {
+      return Nothing();
+    }
+    const nsTextFragment& textFragment = aTextNode.TextFragment();
+    MOZ_ASSERT(aOffset <= textFragment.GetLength());
+    for (uint32_t i = aOffset; i; i--) {
+      char16_t ch = textFragment.CharAt(i - 1);
+      if (!nsCRT::IsAsciiSpace(ch) && ch != kNBSP) {
+        return Some(i - 1);
+      }
+    }
+    return Nothing();
+  }
+
+  /**
+   * GetInclusiveNextCharOffsetExceptWhiteSpaces() returns first offset where
+   * the character is neither an ASCII white-space nor an NBSP at aPoint or
+   * after it.
+   */
+  static Maybe<uint32_t> GetInclusiveNextCharOffsetExceptWhiteSpaces(
+      const EditorDOMPointInText& aPoint) {
+    MOZ_ASSERT(aPoint.IsSetAndValid());
+    return GetInclusiveNextCharOffsetExceptWhiteSpaces(
+        *aPoint.ContainerAsText(), aPoint.Offset());
+  }
+  static Maybe<uint32_t> GetInclusiveNextCharOffsetExceptWhiteSpaces(
+      const dom::Text& aTextNode, uint32_t aOffset) {
+    const nsTextFragment& textFragment = aTextNode.TextFragment();
+    MOZ_ASSERT(aOffset <= textFragment.GetLength());
+    for (uint32_t i = aOffset; i < textFragment.GetLength(); i++) {
+      char16_t ch = textFragment.CharAt(i);
+      if (!nsCRT::IsAsciiSpace(ch) && ch != kNBSP) {
+        return Some(i);
+      }
+    }
+    return Nothing();
+  }
+
+  /**
+   * GetFirstASCIIWhiteSpaceOffsetCollapsedWith() returns first ASCII
+   * white-space offset which is collapsed with a white-space at the given
+   * position.  I.e., the character at the position must be an ASCII
+   * white-space.
+   */
+  static uint32_t GetFirstASCIIWhiteSpaceOffsetCollapsedWith(
+      const EditorDOMPointInText& aPoint) {
+    MOZ_ASSERT(aPoint.IsSetAndValid());
+    MOZ_ASSERT(!aPoint.IsEndOfContainer());
+    MOZ_ASSERT(aPoint.IsCharASCIISpace());
+    return GetFirstASCIIWhiteSpaceOffsetCollapsedWith(*aPoint.ContainerAsText(),
+                                                      aPoint.Offset());
+  }
+  static uint32_t GetFirstASCIIWhiteSpaceOffsetCollapsedWith(
+      const dom::Text& aTextNode, uint32_t aOffset) {
+    MOZ_ASSERT(aOffset < aTextNode.TextLength());
+    MOZ_ASSERT(nsCRT::IsAsciiSpace(aTextNode.TextFragment().CharAt(aOffset)));
+    if (!aOffset) {
+      return 0;
+    }
+    Maybe<uint32_t> previousVisibleCharOffset =
+        GetPreviousCharOffsetExceptASCIIWhiteSpaces(aTextNode, aOffset);
+    return previousVisibleCharOffset.isSome()
+               ? previousVisibleCharOffset.value() + 1
+               : 0;
+  }
+
  private:
   static bool CanNodeContain(nsHTMLTag aParentTagId, nsHTMLTag aChildTagId);
   static bool IsContainerNode(nsHTMLTag aTagId);
+
+  static bool CanCrossContentBoundary(nsIContent& aContent,
+                                      TableBoundary aHowToTreatTableBoundary) {
+    const bool cannotCrossBoundary =
+        (aHowToTreatTableBoundary == TableBoundary::NoCrossAnyTableElement &&
+         HTMLEditUtils::IsAnyTableElement(&aContent)) ||
+        (aHowToTreatTableBoundary == TableBoundary::NoCrossTableElement &&
+         aContent.IsHTMLElement(nsGkAtoms::table));
+    return !cannotCrossBoundary;
+  }
 };
 
 /**
@@ -619,6 +900,94 @@ class MOZ_STACK_CLASS DefinitionListItemScanner final {
  private:
   bool mDTFound = false;
   bool mDDFound = false;
+};
+
+/**
+ * SelectedTableCellScanner() scans all table cell elements which are selected
+ * by each selection range.  Note that if 2nd or later ranges do not select
+ * only one table cell element, the ranges are just ignored.
+ */
+class MOZ_STACK_CLASS SelectedTableCellScanner final {
+ public:
+  SelectedTableCellScanner() = delete;
+  explicit SelectedTableCellScanner(const dom::Selection& aSelection) {
+    dom::Element* firstSelectedCellElement =
+        HTMLEditUtils::GetFirstSelectedTableCellElement(aSelection);
+    if (!firstSelectedCellElement) {
+      return;  // We're not in table cell selection mode.
+    }
+    mSelectedCellElements.SetCapacity(aSelection.RangeCount());
+    mSelectedCellElements.AppendElement(*firstSelectedCellElement);
+    for (uint32_t i = 1; i < aSelection.RangeCount(); i++) {
+      nsRange* range = aSelection.GetRangeAt(i);
+      if (NS_WARN_IF(!range) || NS_WARN_IF(!range->IsPositioned())) {
+        continue;  // Shouldn't occur in normal conditions.
+      }
+      // Just ignore selection ranges which do not select only one table
+      // cell element.  This is possible case if web apps sets multiple
+      // selections and first range selects a table cell element.
+      if (dom::Element* selectedCellElement =
+              HTMLEditUtils::GetTableCellElementIfOnlyOneSelected(*range)) {
+        mSelectedCellElements.AppendElement(*selectedCellElement);
+      }
+    }
+  }
+
+  explicit SelectedTableCellScanner(const AutoRangeArray& aRanges) {
+    if (aRanges.Ranges().IsEmpty()) {
+      return;
+    }
+    dom::Element* firstSelectedCellElement =
+        HTMLEditUtils::GetTableCellElementIfOnlyOneSelected(
+            aRanges.FirstRangeRef());
+    if (!firstSelectedCellElement) {
+      return;  // We're not in table cell selection mode.
+    }
+    mSelectedCellElements.SetCapacity(aRanges.Ranges().Length());
+    mSelectedCellElements.AppendElement(*firstSelectedCellElement);
+    for (uint32_t i = 1; i < aRanges.Ranges().Length(); i++) {
+      nsRange* range = aRanges.Ranges()[i];
+      if (NS_WARN_IF(!range) || NS_WARN_IF(!range->IsPositioned())) {
+        continue;  // Shouldn't occur in normal conditions.
+      }
+      // Just ignore selection ranges which do not select only one table
+      // cell element.  This is possible case if web apps sets multiple
+      // selections and first range selects a table cell element.
+      if (dom::Element* selectedCellElement =
+              HTMLEditUtils::GetTableCellElementIfOnlyOneSelected(*range)) {
+        mSelectedCellElements.AppendElement(*selectedCellElement);
+      }
+    }
+  }
+
+  bool IsInTableCellSelectionMode() const {
+    return !mSelectedCellElements.IsEmpty();
+  }
+
+  const nsTArray<OwningNonNull<dom::Element>>& ElementsRef() const {
+    return mSelectedCellElements;
+  }
+
+  /**
+   * GetFirstElement() and GetNextElement() are stateful iterator methods.
+   * This is useful to port legacy code which used old `nsITableEditor` API.
+   */
+  dom::Element* GetFirstElement() const {
+    MOZ_ASSERT(!mSelectedCellElements.IsEmpty());
+    mIndex = 0;
+    return !mSelectedCellElements.IsEmpty() ? mSelectedCellElements[0].get()
+                                            : nullptr;
+  }
+  dom::Element* GetNextElement() const {
+    MOZ_ASSERT(mIndex < mSelectedCellElements.Length());
+    return ++mIndex < mSelectedCellElements.Length()
+               ? mSelectedCellElements[mIndex].get()
+               : nullptr;
+  }
+
+ private:
+  AutoTArray<OwningNonNull<dom::Element>, 16> mSelectedCellElements;
+  mutable size_t mIndex = 0;
 };
 
 }  // namespace mozilla

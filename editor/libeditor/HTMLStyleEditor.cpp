@@ -59,7 +59,7 @@ nsresult HTMLEditor::SetInlinePropertyAsAction(nsAtom& aProperty,
   switch (editActionData.GetEditAction()) {
     case EditAction::eSetFontFamilyProperty:
       MOZ_ASSERT(!aValue.IsVoid());
-      // XXX Should we trim unnecessary whitespaces?
+      // XXX Should we trim unnecessary white-spaces?
       editActionData.SetData(aValue);
       break;
     case EditAction::eSetColorProperty:
@@ -149,7 +149,7 @@ NS_IMETHODIMP HTMLEditor::SetInlineProperty(const nsAString& aProperty,
   switch (editActionData.GetEditAction()) {
     case EditAction::eSetFontFamilyProperty:
       MOZ_ASSERT(!aValue.IsVoid());
-      // XXX Should we trim unnecessary whitespaces?
+      // XXX Should we trim unnecessary white-spaces?
       editActionData.SetData(aValue);
       break;
     case EditAction::eSetColorProperty:
@@ -222,7 +222,7 @@ nsresult HTMLEditor::SetInlinePropertyInternal(
     // XXX This is different from `SetCSSBackgroundColorWithTransaction()`.
     //     It refers `Selection::GetRangeAt()` in each time.  The result may
     //     be different if mutation event listener changes the `Selection`.
-    AutoRangeArray arrayOfRanges(SelectionRefPtr());
+    AutoSelectionRangeArray arrayOfRanges(SelectionRefPtr());
     for (auto& range : arrayOfRanges.mRanges) {
       // Adjust range to include any ancestors whose children are entirely
       // selected
@@ -1881,10 +1881,10 @@ nsresult HTMLEditor::RemoveInlinePropertyInternal(
     for (HTMLStyle& style : removeStyles) {
       // Loop through the ranges in the selection.
       // XXX Although `Selection` will be restored by AutoSelectionRestorer,
-      //     AutoRangeArray just grabs the ranges in `Selection`.  Therefore,
-      //     modifying each range may notify selection listener.  So perhaps,
-      //     we should clone each range here instead.
-      AutoRangeArray arrayOfRanges(SelectionRefPtr());
+      //     AutoSelectionRangeArray just grabs the ranges in `Selection`.
+      //     Therefore, modifying each range may notify selection listener.  So
+      //     perhaps, we should clone each range here instead.
+      AutoSelectionRangeArray arrayOfRanges(SelectionRefPtr());
       for (auto& range : arrayOfRanges.mRanges) {
         if (style.mProperty == nsGkAtoms::name) {
           // Promote range if it starts or end in a named anchor and we want to
@@ -2239,7 +2239,7 @@ nsresult HTMLEditor::RelativeFontChange(FontSize aDir) {
   AutoTransactionsConserveSelection dontChangeMySelection(*this);
 
   // Loop through the ranges in the selection
-  AutoRangeArray arrayOfRanges(SelectionRefPtr());
+  AutoSelectionRangeArray arrayOfRanges(SelectionRefPtr());
   for (auto& range : arrayOfRanges.mRanges) {
     // Adjust range to include any ancestors with entirely selected children
     nsresult rv = PromoteInlineRange(*range);

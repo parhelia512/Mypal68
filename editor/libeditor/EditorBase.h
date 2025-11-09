@@ -5,6 +5,7 @@
 #ifndef mozilla_EditorBase_h
 #define mozilla_EditorBase_h
 
+#include "mozilla/intl/BidiEmbeddingLevel.h"
 #include "mozilla/Assertions.h"          // for MOZ_ASSERT, etc.
 #include "mozilla/EditAction.h"          // for EditAction and EditSubAction
 #include "mozilla/EditorDOMPoint.h"      // for EditorDOMPoint
@@ -57,6 +58,7 @@ class nsRange;
 
 namespace mozilla {
 class AlignStateAtSelection;
+class AutoRangeArray;
 class AutoSelectionRestorer;
 class AutoTopLevelEditSubActionNotifier;
 class AutoTransactionBatch;
@@ -85,6 +87,7 @@ class ListItemElementSelectionState;
 class ParagraphStateAtSelection;
 class PlaceholderTransaction;
 class PresShell;
+class ReplaceTextTransaction;
 class SplitNodeResult;
 class SplitNodeTransaction;
 class TextComposition;
@@ -92,7 +95,7 @@ class TextEditor;
 class TextInputListener;
 class TextServicesDocument;
 class TypeInState;
-class WSRunObject;
+class WhiteSpaceVisibilityKeeper;
 
 template <typename NodeType>
 class CreateNodeResultBase;
@@ -413,7 +416,7 @@ class EditorBase : public nsIEditor,
    */
   uint32_t Flags() const { return mFlags; }
 
-  nsresult AddFlags(uint32_t aFlags) {
+  MOZ_CAN_RUN_SCRIPT nsresult AddFlags(uint32_t aFlags) {
     const uint32_t kOldFlags = Flags();
     const uint32_t kNewFlags = (kOldFlags | aFlags);
     if (kNewFlags == kOldFlags) {
@@ -421,7 +424,7 @@ class EditorBase : public nsIEditor,
     }
     return SetFlags(kNewFlags);  // virtual call and may be expensive.
   }
-  nsresult RemoveFlags(uint32_t aFlags) {
+  MOZ_CAN_RUN_SCRIPT nsresult RemoveFlags(uint32_t aFlags) {
     const uint32_t kOldFlags = Flags();
     const uint32_t kNewFlags = (kOldFlags & ~aFlags);
     if (kNewFlags == kOldFlags) {
@@ -429,7 +432,8 @@ class EditorBase : public nsIEditor,
     }
     return SetFlags(kNewFlags);  // virtual call and may be expensive.
   }
-  nsresult AddAndRemoveFlags(uint32_t aAddingFlags, uint32_t aRemovingFlags) {
+  MOZ_CAN_RUN_SCRIPT nsresult AddAndRemoveFlags(uint32_t aAddingFlags,
+                                                uint32_t aRemovingFlags) {
     MOZ_ASSERT(!(aAddingFlags & aRemovingFlags),
                "Same flags are specified both adding and removing");
     const uint32_t kOldFlags = Flags();
@@ -667,6 +671,10 @@ class EditorBase : public nsIEditor,
     // to restore it.
     bool mRestoreContentEditableCount;
 
+    // If we explicitly normalized whitespaces around the changed range,
+    // set to true.
+    bool mDidNormalizeWhitespaces;
+
     /**
      * The following methods modifies some data of this struct and
      * `EditSubActionData` struct.  Currently, these are required only
@@ -715,6 +723,7 @@ class EditorBase : public nsIEditor,
       mDidDeleteNonCollapsedRange = false;
       mDidDeleteEmptyParentBlocks = false;
       mRestoreContentEditableCount = false;
+      mDidNormalizeWhitespaces = false;
     }
 
     /**
@@ -822,11 +831,16 @@ class EditorBase : public nsIEditor,
      * dispatch "beforeinput" event or not.  Then,
      * mHasTriedToDispatchBeforeInputEvent is set to true.
      *
+     * @param aDeleteDirectionAndAmount
+     *                  If `MayEditActionDeleteAroundCollapsedSelection(
+     *                  mEditAction)` returns true, this must be set.
+     *                  Otherwise, don't set explicitly.
      * @return          If this method actually dispatches "beforeinput" event
      *                  and it's canceled, returns
      *                  NS_ERROR_EDITOR_ACTION_CANCELED.
      */
-    [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult MaybeDispatchBeforeInputEvent();
+    [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult MaybeDispatchBeforeInputEvent(
+        nsIEditor::EDirection aDeleteDirectionAndAmount = nsIEditor::eNone);
 
     /**
      * MarkAsBeforeInputHasBeenDispatched() should be called only when updating
@@ -843,13 +857,20 @@ class EditorBase : public nsIEditor,
     }
 
     /**
-     * NeedsToDispatchBeforeInputEvent() returns true if the edit action
-     * requires to handle "beforeinput" event but not yet dispatched it nor
-     * considered as not dispatched it.
+     * ShouldAlreadyHaveHandledBeforeInputEventDispatching() returns true if the
+     * edit action requires to handle "beforeinput" event but not yet dispatched
+     * it nor considered as not dispatched it and can dispatch it when this is
+     * called.
      */
-    bool NeedsToDispatchBeforeInputEvent() const {
+    bool ShouldAlreadyHaveHandledBeforeInputEventDispatching() const {
       return !HasTriedToDispatchBeforeInputEvent() &&
-             NeedsBeforeInputEventHandling(mEditAction);
+             NeedsBeforeInputEventHandling(mEditAction) &&
+             IsBeforeInputEventEnabled() /* &&
+              // If we still need to dispatch a clipboard event, we should
+              // dispatch it first, then, we need to dispatch beforeinput
+              // event later.
+              !NeedsToDispatchClipboardEvent()*/
+          ;
     }
 
     /**
@@ -929,6 +950,23 @@ class EditorBase : public nsIEditor,
      * ranges to selection ranges.
      */
     void AppendTargetRange(dom::StaticRange& aTargetRange);
+
+    /**
+     * Make dispatching `beforeinput` forcibly non-cancelable.
+     */
+    void MakeBeforeInputEventNonCancelable() {
+      mMakeBeforeInputEventNonCancelable = true;
+    }
+
+    /**
+     * NotifyOfDispatchingClipboardEvent() is called after dispatching
+     * a clipboard event.
+     */
+    void NotifyOfDispatchingClipboardEvent() {
+      MOZ_ASSERT(NeedsToDispatchClipboardEvent());
+      MOZ_ASSERT(!mHasTriedToDispatchClipboardEvent);
+      mHasTriedToDispatchClipboardEvent = true;
+    }
 
     void Abort() { mAborted = true; }
     bool IsAborted() const { return mAborted; }
@@ -1046,6 +1084,8 @@ class EditorBase : public nsIEditor,
     }
 
    private:
+    bool IsBeforeInputEventEnabled() const;
+
     static bool NeedsBeforeInputEventHandling(EditAction aEditAction) {
       MOZ_ASSERT(aEditAction != EditAction::eNone);
       switch (aEditAction) {
@@ -1070,7 +1110,6 @@ class EditorBase : public nsIEditor,
         // We don't need to let contents in chrome's editor to know the size
         // change.
         case EditAction::eSetWrapWidth:
-        case EditAction::eRewrap:
         // While resizing or moving element, we update only shadow, i.e.,
         // don't touch to the DOM in content.  Therefore, we don't need to
         // dispatch "beforeinput" event.
@@ -1083,6 +1122,21 @@ class EditorBase : public nsIEditor,
           return false;
         default:
           return true;
+      }
+    }
+
+    bool NeedsToDispatchClipboardEvent() const {
+      if (mHasTriedToDispatchClipboardEvent) {
+        return false;
+      }
+      switch (mEditAction) {
+        case EditAction::ePaste:
+        case EditAction::ePasteAsQuotation:
+        case EditAction::eCut:
+        case EditAction::eCopy:
+          return true;
+        default:
+          return false;
       }
     }
 
@@ -1140,6 +1194,12 @@ class EditorBase : public nsIEditor,
     bool mHasTriedToDispatchBeforeInputEvent;
     // Set to true if "beforeinput" event was dispatched and it's canceled.
     bool mBeforeInputEventCanceled;
+    // Set to true if `beforeinput` event must not be cancelable even if
+    // its inputType is defined as cancelable by the standards.
+    bool mMakeBeforeInputEventNonCancelable;
+    // Set to true when the edit action handler tries to dispatch a clipboard
+    // event.
+    bool mHasTriedToDispatchClipboardEvent;
 
 #ifdef DEBUG
     mutable bool mHasCanHandleChecked = false;
@@ -1151,6 +1211,11 @@ class EditorBase : public nsIEditor,
 
   void UpdateEditActionData(const nsAString& aData) {
     mEditActionData->SetData(aData);
+  }
+
+  void NotifyOfDispatchingClipboardEvent() {
+    MOZ_ASSERT(mEditActionData);
+    mEditActionData->NotifyOfDispatchingClipboardEvent();
   }
 
  protected:  // May be called by friends.
@@ -1166,9 +1231,10 @@ class EditorBase : public nsIEditor,
     return mEditActionData->IsCanceled();
   }
 
-  bool NeedsToDispatchBeforeInputEvent() const {
+  bool ShouldAlreadyHaveHandledBeforeInputEventDispatching() const {
     MOZ_ASSERT(mEditActionData);
-    return mEditActionData->NeedsToDispatchBeforeInputEvent();
+    return mEditActionData
+        ->ShouldAlreadyHaveHandledBeforeInputEventDispatching();
   }
 
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult MaybeDispatchBeforeInputEvent() {
@@ -1383,7 +1449,7 @@ class EditorBase : public nsIEditor,
    * @param aStringToInsert     String to be inserted.
    * @param aPointToInsert      The insertion point.
    * @param aSuppressIME        true if it's not a part of IME composition.
-   *                            E.g., adjusting whitespaces during composition.
+   *                            E.g., adjusting white-spaces during composition.
    *                            false, otherwise.
    */
   MOZ_CAN_RUN_SCRIPT nsresult InsertTextIntoTextNodeWithTransaction(
@@ -1727,7 +1793,7 @@ class EditorBase : public nsIEditor,
   /**
    * CollapseSelectionToEnd() collapses the selection to the end of the editor.
    */
-  nsresult CollapseSelectionToEnd();
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY nsresult CollapseSelectionToEnd() const;
 
   /**
    * AllowsTransactionsToChangeSelection() returns true if editor allows any
@@ -1778,7 +1844,8 @@ class EditorBase : public nsIEditor,
    * @return            Better insertion point if there is.  If not returns
    *                    same point as aPoint.
    */
-  EditorRawDOMPoint FindBetterInsertionPoint(const EditorRawDOMPoint& aPoint);
+  EditorRawDOMPoint FindBetterInsertionPoint(
+      const EditorRawDOMPoint& aPoint) const;
 
   /**
    * HideCaret() hides caret with nsCaret::AddForceHide() or may show carent
@@ -1789,24 +1856,62 @@ class EditorBase : public nsIEditor,
 
  protected:  // Edit sub-action handler
   /**
-   * SetCaretBidiLevelForDeletion() sets caret bidi level if necessary.
-   * If current point is bidi boundary and caller shouldn't handle the
-   * deletion, returns as "canceled".  Note that even if this sets caret
-   * bidi level, this won't mark the result as "handled" so that you can
-   * use the result as edit sub-action handler's result.
-   *
-   * @param aPointAtCaret       Collapsed `Selection` point.
-   * @param aDirectionAndAmount The direction and amount to delete.
+   * AutoCaretBidiLevelManager() computes bidi level of caret, deleting
+   * character(s) from aPointAtCaret at construction.  Then, if you'll
+   * need to extend the selection, you should calls `UpdateCaretBidiLevel()`,
+   * then, this class may update caret bidi level for you if it's required.
    */
-  template <typename PT, typename CT>
-  EditActionResult SetCaretBidiLevelForDeletion(
-      const EditorDOMPointBase<PT, CT>& aPointAtCaret,
-      nsIEditor::EDirection aDirectionAndAmount) const;
+  class MOZ_RAII AutoCaretBidiLevelManager final {
+   public:
+    /**
+     * @param aEditorBase         The editor.
+     * @param aPointAtCaret       Collapsed `Selection` point.
+     * @param aDirectionAndAmount The direction and amount to delete.
+     */
+    template <typename PT, typename CT>
+    AutoCaretBidiLevelManager(const EditorBase& aEditorBase,
+                              nsIEditor::EDirection aDirectionAndAmount,
+                              const EditorDOMPointBase<PT, CT>& aPointAtCaret);
+
+    /**
+     * Failed() returns true if the constructor failed to handle the bidi
+     * information.
+     */
+    bool Failed() const { return mFailed; }
+
+    /**
+     * Canceled() returns true if when the caller should stop deleting
+     * characters since caret position is not visually adjacent the deleting
+     * characters and user does not wand to delete them in that case.
+     */
+    bool Canceled() const { return mCanceled; }
+
+    /**
+     * MaybeUpdateCaretBidiLevel() may update caret bidi level and schedule to
+     * paint it if they are necessary.
+     */
+    void MaybeUpdateCaretBidiLevel(const EditorBase& aEditorBase) const;
+
+   private:
+    Maybe<mozilla::intl::BidiEmbeddingLevel> mNewCaretBidiLevel;
+    bool mFailed = false;
+    bool mCanceled = false;
+  };
 
   /**
    * UndefineCaretBidiLevel() resets bidi level of the caret.
    */
   void UndefineCaretBidiLevel() const;
+
+  /**
+   * Flushing pending notifications if nsFrameSelection requires the latest
+   * layout information to compute deletion range.  This may destroy the
+   * editor instance itself.  When this returns false, don't keep doing
+   * anything.
+   */
+  [[nodiscard]] MOZ_CAN_RUN_SCRIPT bool
+  FlushPendingNotificationsIfToHandleDeletionWithFrameSelection(
+      nsIEditor::EDirection aDirectionAndAmount) const;
 
   /**
    * DeleteSelectionAsSubAction() removes selection content or content around
@@ -2098,7 +2203,8 @@ class EditorBase : public nsIEditor,
    *                            has parent node.  So, it's always safe to
    *                            call SetAncestorLimit() with this node.
    */
-  virtual void InitializeSelectionAncestorLimit(nsIContent& aAncestorLimit);
+  virtual void InitializeSelectionAncestorLimit(
+      nsIContent& aAncestorLimit) const;
 
   /**
    * Creates a range with just the supplied node and appends that to the
@@ -2111,7 +2217,7 @@ class EditorBase : public nsIEditor,
    * When you are using AppendNodeToSelectionAsRange(), call this first to
    * start a new selection.
    */
-  nsresult ClearSelection();
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY nsresult ClearSelection();
 
   /**
    * Initializes selection and caret for the editor.  If aEventTarget isn't
@@ -2159,21 +2265,14 @@ class EditorBase : public nsIEditor,
       case nsIEditor::eNextWord:
       case nsIEditor::eToBeginningOfLine:
       case nsIEditor::eToEndOfLine:
-        // If the amount is word or line,`ExtendSelectionForDelete()`
-        // must have already been extended collapsed ranges before.
+        // If the amount is word or
+        // line,`AutoRangeArray::ExtendAnchorFocusRangeFor()` must have already
+        // been extended collapsed ranges before.
         return HowToHandleCollapsedRange::Ignore;
     }
     MOZ_ASSERT_UNREACHABLE("Invalid nsIEditor::EDirection value");
     return HowToHandleCollapsedRange::Ignore;
   }
-
-  /**
-   * Extends the selection for given deletion operation
-   * If done, also update aDirectionAndAmount to what's actually left to do
-   * after the extension.
-   */
-  [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult
-  ExtendSelectionForDelete(nsIEditor::EDirection* aDirectionAndAmount);
 
   /**
    * DeleteSelectionWithTransaction() removes selected content or content
@@ -2192,20 +2291,41 @@ class EditorBase : public nsIEditor,
                                  nsIEditor::EStripWrappers aStripWrappers);
 
   /**
-   * Create an aggregate transaction for delete selection.  The result may
-   * include DeleteNodeTransactions and/or DeleteTextTransactions as its
-   * children.
+   * DeleteRangesWithTransaction() removes content in aRangesToDelete or content
+   * around collapsed ranges in aRangesToDelete with transactions and remove
+   * empty inclusive ancestor inline elements of collapsed ranges after
+   * removing the contents.
+   *
+   * @param aDirectionAndAmount How much range should be removed.
+   * @param aStripWrappers      Whether the parent blocks should be removed
+   *                            when they become empty.
+   *                            Note that this must be `nsIEditor::eNoStrip`
+   *                            if this is a TextEditor because anyway it'll
+   *                            be ignored.
+   * @param aRangesToDelete     The ranges to delete content.
+   */
+  [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult
+  DeleteRangesWithTransaction(nsIEditor::EDirection aDirectionAndAmount,
+                              nsIEditor::EStripWrappers aStripWrappers,
+                              const AutoRangeArray& aRangesToDelete);
+
+  /**
+   * Create an aggregate transaction for delete the content in aRangesToDelete.
+   * The result may include DeleteNodeTransactions and/or DeleteTextTransactions
+   * as its children.
    *
    * @param aHowToHandleCollapsedRange
    *                            How to handle collapsed ranges.
-   * @return                    If it can remove the selection, returns an
-   *                            aggregate transaction which has some
+   * @param aRangesToDelete     The ranges to delete content.
+   * @return                    If it can remove the content in ranges, returns
+   *                            an aggregate transaction which has some
    *                            DeleteNodeTransactions and/or
    *                            DeleteTextTransactions as its children.
    */
   already_AddRefed<EditAggregateTransaction>
   CreateTransactionForDeleteSelection(
-      HowToHandleCollapsedRange aHowToHandleCollapsedRange);
+      HowToHandleCollapsedRange aHowToHandleCollapsedRange,
+      const AutoRangeArray& aRangesToDelete);
 
   /**
    * Create a transaction for removing the nodes and/or text around
@@ -2224,6 +2344,15 @@ class EditorBase : public nsIEditor,
   already_AddRefed<EditTransactionBase> CreateTransactionForCollapsedRange(
       const nsRange& aCollapsedRange,
       HowToHandleCollapsedRange aHowToHandleCollapsedRange);
+
+  /**
+   * ComputeInsertedRange() returns actual range modified by inserting string
+   * in a text node.  If mutation event listener changed the text data, this
+   * returns a range which covers all over the text data.
+   */
+  Tuple<EditorDOMPointInText, EditorDOMPointInText> ComputeInsertedRange(
+      const EditorDOMPointInText& aInsertedPoint,
+      const nsAString& aInsertedString) const;
 
  private:
   nsCOMPtr<nsISelectionController> mSelectionController;
@@ -2400,7 +2529,7 @@ class EditorBase : public nsIEditor,
   enum Tristate { eTriUnset, eTriFalse, eTriTrue };
 
   // MIME type of the doc we are editing.
-  nsCString mContentMIMEType;
+  nsString mContentMIMEType;
 
   RefPtr<mozInlineSpellChecker> mInlineSpellChecker;
   // Reference to text services document for mInlineSpellChecker.
@@ -2489,6 +2618,7 @@ class EditorBase : public nsIEditor,
   bool mIsHTMLEditorClass;
 
   friend class AlignStateAtSelection;
+  friend class AutoRangeArray;
   friend class CompositionTransaction;
   friend class CreateElementTransaction;
   friend class CSSEditUtils;
@@ -2502,9 +2632,10 @@ class EditorBase : public nsIEditor,
   friend class ListElementSelectionState;
   friend class ListItemElementSelectionState;
   friend class ParagraphStateAtSelection;
+  friend class ReplaceTextTransaction;
   friend class SplitNodeTransaction;
   friend class TypeInState;
-  friend class WSRunObject;
+  friend class WhiteSpaceVisibilityKeeper;
   friend class WSRunScanner;
   friend class nsIEditor;
 };

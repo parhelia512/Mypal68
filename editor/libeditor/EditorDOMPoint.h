@@ -7,11 +7,14 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/RangeBoundary.h"
+#include "mozilla/dom/AbstractRange.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Text.h"
 #include "nsAtom.h"
 #include "nsCOMPtr.h"
+#include "nsContentUtils.h"
 #include "nsCRT.h"
 #include "nsGkAtoms.h"
 #include "nsIContent.h"
@@ -69,6 +72,7 @@ typedef EditorDOMPointBase<nsCOMPtr<nsINode>, nsCOMPtr<nsIContent>>
     EditorDOMPoint;
 typedef EditorDOMPointBase<nsINode*, nsIContent*> EditorRawDOMPoint;
 typedef EditorDOMPointBase<RefPtr<dom::Text>, nsIContent*> EditorDOMPointInText;
+typedef EditorDOMPointBase<dom::Text*, nsIContent*> EditorRawDOMPointInText;
 
 template <typename ParentType, typename ChildType>
 class EditorDOMPointBase final {
@@ -339,6 +343,26 @@ class EditorDOMPointBase final {
     return nsCRT::IsAsciiSpace(Char());
   }
   MOZ_NEVER_INLINE_DEBUG bool IsCharNBSP() const { return Char() == 0x00A0; }
+  MOZ_NEVER_INLINE_DEBUG bool IsCharASCIISpaceOrNBSP() const {
+    char16_t ch = Char();
+    return nsCRT::IsAsciiSpace(ch) || ch == 0x00A0;
+  }
+
+  MOZ_NEVER_INLINE_DEBUG bool IsCharHighSurrogateFollowedByLowSurrogate()
+      const {
+    MOZ_ASSERT(IsSetAndValid());
+    MOZ_ASSERT(!IsEndOfContainer());
+    return ContainerAsText()
+        ->TextFragment()
+        .IsHighSurrogateFollowedByLowSurrogateAt(mOffset.value());
+  }
+  MOZ_NEVER_INLINE_DEBUG bool IsCharLowSurrogateFollowingHighSurrogate() const {
+    MOZ_ASSERT(IsSetAndValid());
+    MOZ_ASSERT(!IsEndOfContainer());
+    return ContainerAsText()
+        ->TextFragment()
+        .IsLowSurrogateFollowingHighSurrogateAt(mOffset.value());
+  }
 
   MOZ_NEVER_INLINE_DEBUG char16_t PreviousChar() const {
     MOZ_ASSERT(IsSetAndValid());
@@ -351,6 +375,10 @@ class EditorDOMPointBase final {
   MOZ_NEVER_INLINE_DEBUG bool IsPreviousCharNBSP() const {
     return PreviousChar() == 0x00A0;
   }
+  MOZ_NEVER_INLINE_DEBUG bool IsPreviousCharASCIISpaceOrNBSP() const {
+    char16_t ch = PreviousChar();
+    return nsCRT::IsAsciiSpace(ch) || ch == 0x00A0;
+  }
 
   MOZ_NEVER_INLINE_DEBUG char16_t NextChar() const {
     MOZ_ASSERT(IsSetAndValid());
@@ -362,6 +390,10 @@ class EditorDOMPointBase final {
   }
   MOZ_NEVER_INLINE_DEBUG bool IsNextCharNBSP() const {
     return NextChar() == 0x00A0;
+  }
+  MOZ_NEVER_INLINE_DEBUG bool IsNextCharASCIISpaceOrNBSP() const {
+    char16_t ch = NextChar();
+    return nsCRT::IsAsciiSpace(ch) || ch == 0x00A0;
   }
 
   uint32_t Offset() const {
@@ -897,6 +929,35 @@ class EditorDOMPointBase final {
     return RawRangeBoundary(mParent, mParent->GetLastChild());
   }
 
+  EditorDOMPointInText GetAsInText() const {
+    return IsInTextNode() ? EditorDOMPointInText(ContainerAsText(), Offset())
+                          : EditorDOMPointInText();
+  }
+  MOZ_NEVER_INLINE_DEBUG EditorDOMPointInText AsInText() const {
+    MOZ_ASSERT(IsInTextNode());
+    return EditorDOMPointInText(ContainerAsText(), Offset());
+  }
+
+  template <typename A, typename B>
+  bool IsBefore(const EditorDOMPointBase<A, B>& aOther) const {
+    if (!IsSetAndValid() || !aOther.IsSetAndValid()) {
+      return false;
+    }
+    Maybe<int32_t> comp = nsContentUtils::ComparePoints(
+        ToRawRangeBoundary(), aOther.ToRawRangeBoundary());
+    return comp.isSome() && comp.value() == -1;
+  }
+
+  template <typename A, typename B>
+  bool EqualsOrIsBefore(const EditorDOMPointBase<A, B>& aOther) const {
+    if (!IsSetAndValid() || !aOther.IsSetAndValid()) {
+      return false;
+    }
+    Maybe<int32_t> comp = nsContentUtils::ComparePoints(
+        ToRawRangeBoundary(), aOther.ToRawRangeBoundary());
+    return comp.isSome() && comp.value() <= 0;
+  }
+
  private:
   void EnsureChild() {
     if (mIsChildInitialized) {
@@ -942,6 +1003,135 @@ inline void ImplCycleCollectionTraverse(
     const char* aName, uint32_t aFlags) {
   ImplCycleCollectionTraverse(aCallback, aField.mParent, "mParent", 0);
   ImplCycleCollectionTraverse(aCallback, aField.mChild, "mChild", 0);
+}
+
+template <typename EditorDOMPointType>
+class EditorDOMRangeBase;
+
+/**
+ * EditorDOMRangeBase class stores a pair of same EditorDOMPointBase type.
+ * The instance must be created with valid DOM points and start must be
+ * before or same as end.
+ */
+
+typedef EditorDOMRangeBase<EditorDOMPoint> EditorDOMRange;
+typedef EditorDOMRangeBase<EditorRawDOMPoint> EditorRawDOMRange;
+typedef EditorDOMRangeBase<EditorDOMPointInText> EditorDOMRangeInTexts;
+typedef EditorDOMRangeBase<EditorRawDOMPointInText> EditorRawDOMRangeInTexts;
+
+template <typename EditorDOMPointType>
+class EditorDOMRangeBase final {
+ public:
+  EditorDOMRangeBase() = default;
+  template <typename PT, typename CT>
+  explicit EditorDOMRangeBase(const EditorDOMPointBase<PT, CT>& aStart)
+      : mStart(aStart), mEnd(aStart) {
+    MOZ_ASSERT(!mStart.IsSet() || mStart.IsSetAndValid());
+  }
+  template <typename StartPointType, typename EndPointType>
+  explicit EditorDOMRangeBase(const StartPointType& aStart,
+                              const EndPointType& aEnd)
+      : mStart(aStart), mEnd(aEnd) {
+    MOZ_ASSERT_IF(mStart.IsSet(), mStart.IsSetAndValid());
+    MOZ_ASSERT_IF(mEnd.IsSet(), mEnd.IsSetAndValid());
+    MOZ_ASSERT_IF(mStart.IsSet() && mEnd.IsSet(),
+                  mStart.EqualsOrIsBefore(mEnd));
+  }
+  explicit EditorDOMRangeBase(const dom::AbstractRange& aRange)
+      : mStart(aRange.StartRef()), mEnd(aRange.EndRef()) {
+    MOZ_ASSERT_IF(mStart.IsSet(), mStart.IsSetAndValid());
+    MOZ_ASSERT_IF(mEnd.IsSet(), mEnd.IsSetAndValid());
+    MOZ_ASSERT_IF(mStart.IsSet() && mEnd.IsSet(),
+                  mStart.EqualsOrIsBefore(mEnd));
+  }
+
+  template <typename PointType>
+  MOZ_NEVER_INLINE_DEBUG void SetStart(const PointType& aStart) {
+    mStart = aStart;
+  }
+  template <typename PointType>
+  MOZ_NEVER_INLINE_DEBUG void SetEnd(const PointType& aEnd) {
+    mEnd = aEnd;
+  }
+  template <typename StartPointType, typename EndPointType>
+  MOZ_NEVER_INLINE_DEBUG void SetStartAndEnd(const StartPointType& aStart,
+                                             const EndPointType& aEnd) {
+    MOZ_ASSERT_IF(aStart.IsSet() && aEnd.IsSet(),
+                  aStart.EqualsOrIsBefore(aEnd));
+    mStart = aStart;
+    mEnd = aEnd;
+  }
+
+  const EditorDOMPointType& StartRef() const { return mStart; }
+  const EditorDOMPointType& EndRef() const { return mEnd; }
+
+  bool Collapsed() const {
+    MOZ_ASSERT(IsPositioned());
+    return mStart == mEnd;
+  }
+  bool IsPositioned() const { return mStart.IsSet() && mEnd.IsSet(); }
+  bool IsPositionedAndValid() const {
+    return mStart.IsSetAndValid() && mEnd.IsSetAndValid() &&
+           mStart.EqualsOrIsBefore(mEnd);
+  }
+  template <typename OtherPointType>
+  MOZ_NEVER_INLINE_DEBUG bool Contains(const OtherPointType& aPoint) const {
+    MOZ_ASSERT(aPoint.IsSetAndValid());
+    return IsPositioned() && aPoint.IsSet() &&
+           mStart.EqualsOrIsBefore(aPoint) && aPoint.IsBefore(mEnd);
+  }
+  bool InSameContainer() const {
+    MOZ_ASSERT(IsPositioned());
+    return IsPositioned() && mStart.GetContainer() == mEnd.GetContainer();
+  }
+  bool IsInContentNodes() const {
+    MOZ_ASSERT(IsPositioned());
+    return IsPositioned() && mStart.IsInContentNode() && mEnd.IsInContentNode();
+  }
+  bool IsInTextNodes() const {
+    MOZ_ASSERT(IsPositioned());
+    return IsPositioned() && mStart.IsInTextNode() && mEnd.IsInTextNode();
+  }
+  template <typename OtherRangeType>
+  bool operator==(const OtherRangeType& aOther) const {
+    return (!IsPositioned() && !aOther.IsPositioned()) ||
+           (mStart == aOther.mStart && mEnd == aOther.mEnd);
+  }
+  template <typename OtherRangeType>
+  bool operator!=(const OtherRangeType& aOther) const {
+    return !(*this == aOther);
+  }
+
+  EditorDOMRangeInTexts GetAsInTexts() const {
+    return IsInTextNodes()
+               ? EditorDOMRangeInTexts(mStart.AsInText(), mEnd.AsInText())
+               : EditorDOMRangeInTexts();
+  }
+  MOZ_NEVER_INLINE_DEBUG EditorDOMRangeInTexts AsInTexts() const {
+    MOZ_ASSERT(IsInTextNodes());
+    return EditorDOMRangeInTexts(mStart.AsInText(), mEnd.AsInText());
+  }
+
+ private:
+  EditorDOMPointType mStart;
+  EditorDOMPointType mEnd;
+
+  friend void ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback&,
+                                          EditorDOMRange&, const char*,
+                                          uint32_t);
+  friend void ImplCycleCollectionUnlink(EditorDOMRange&);
+};
+
+inline void ImplCycleCollectionUnlink(EditorDOMRange& aField) {
+  ImplCycleCollectionUnlink(aField.mStart);
+  ImplCycleCollectionUnlink(aField.mEnd);
+}
+
+inline void ImplCycleCollectionTraverse(
+    nsCycleCollectionTraversalCallback& aCallback, EditorDOMRange& aField,
+    const char* aName, uint32_t aFlags) {
+  ImplCycleCollectionTraverse(aCallback, aField.mStart, "mStart", 0);
+  ImplCycleCollectionTraverse(aCallback, aField.mEnd, "mEnd", 0);
 }
 
 /**

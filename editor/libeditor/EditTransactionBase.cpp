@@ -16,6 +16,7 @@
 #include "InsertTextTransaction.h"
 #include "JoinNodeTransaction.h"
 #include "PlaceholderTransaction.h"
+#include "ReplaceTextTransaction.h"
 #include "SplitNodeTransaction.h"
 
 #include "nsError.h"
@@ -68,6 +69,7 @@ NS_IMPL_EDITTRANSACTIONBASE_GETASMETHODS(InsertNodeTransaction)
 NS_IMPL_EDITTRANSACTIONBASE_GETASMETHODS(InsertTextTransaction)
 NS_IMPL_EDITTRANSACTIONBASE_GETASMETHODS(JoinNodeTransaction)
 NS_IMPL_EDITTRANSACTIONBASE_GETASMETHODS(PlaceholderTransaction)
+NS_IMPL_EDITTRANSACTIONBASE_GETASMETHODS(ReplaceTextTransaction)
 NS_IMPL_EDITTRANSACTIONBASE_GETASMETHODS(SplitNodeTransaction)
 
 #undef NS_IMPL_EDITTRANSACTIONBASE_GETASMETHODS

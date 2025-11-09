@@ -33,6 +33,7 @@ class InsertNodeTransaction;
 class InsertTextTransaction;
 class JoinNodeTransaction;
 class PlaceholderTransaction;
+class ReplaceTextTransaction;
 class SplitNodeTransaction;
 
 #define NS_DECL_GETASTRANSACTION_BASE(aClass) \
@@ -70,6 +71,7 @@ class EditTransactionBase : public nsITransaction {
   NS_DECL_GETASTRANSACTION_BASE(InsertTextTransaction)
   NS_DECL_GETASTRANSACTION_BASE(JoinNodeTransaction)
   NS_DECL_GETASTRANSACTION_BASE(PlaceholderTransaction)
+  NS_DECL_GETASTRANSACTION_BASE(ReplaceTextTransaction)
   NS_DECL_GETASTRANSACTION_BASE(SplitNodeTransaction)
 
  protected:

@@ -6,10 +6,12 @@
 #define mozilla_SelectionState_h
 
 #include "mozilla/EditorDOMPoint.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/OwningNonNull.h"
 #include "nsCOMPtr.h"
 #include "nsDirection.h"
 #include "nsINode.h"
+#include "nsRange.h"
 #include "nsTArray.h"
 #include "nscore.h"
 
@@ -142,9 +144,11 @@ class MOZ_STACK_CLASS RangeUpdater final {
                            nsINode& aParent, int32_t aOffset,
                            int32_t aOldLeftNodeLength);
   void SelAdjInsertText(const dom::Text& aTextNode, int32_t aOffset,
-                        const nsAString& aString);
-  nsresult SelAdjDeleteText(const dom::Text& aTextNode, int32_t aOffset,
-                            int32_t aLength);
+                        int32_t aInsertedLength);
+  void SelAdjDeleteText(const dom::Text& aTextNode, int32_t aOffset,
+                        int32_t aDeletedLength);
+  void SelAdjReplaceText(const dom::Text& aTextNode, int32_t aOffset,
+                         int32_t aReplacedLength, int32_t aInsertedLength);
   // the following gravity routines need will/did sandwiches, because the other
   // gravity routines will be called inside of these sandwiches, but should be
   // ignored.
@@ -251,6 +255,69 @@ class MOZ_STACK_CLASS AutoTrackDOMPoint final {
   OwningNonNull<RangeItem> mRangeItem;
 };
 
+class MOZ_STACK_CLASS AutoTrackDOMRange final {
+ public:
+  AutoTrackDOMRange() = delete;
+  AutoTrackDOMRange(RangeUpdater& aRangeUpdater, EditorDOMPoint* aStartPoint,
+                    EditorDOMPoint* aEndPoint)
+      : mRangeRefPtr(nullptr), mRangeOwningNonNull(nullptr) {
+    mStartPointTracker.emplace(aRangeUpdater, aStartPoint);
+    mEndPointTracker.emplace(aRangeUpdater, aEndPoint);
+  }
+  AutoTrackDOMRange(RangeUpdater& aRangeUpdater, EditorDOMRange* aRange)
+      : mRangeRefPtr(nullptr), mRangeOwningNonNull(nullptr) {
+    mStartPointTracker.emplace(
+        aRangeUpdater, const_cast<EditorDOMPoint*>(&aRange->StartRef()));
+    mEndPointTracker.emplace(aRangeUpdater,
+                             const_cast<EditorDOMPoint*>(&aRange->EndRef()));
+  }
+  AutoTrackDOMRange(RangeUpdater& aRangeUpdater, RefPtr<nsRange>* aRange)
+      : mStartPoint((*aRange)->StartRef()),
+        mEndPoint((*aRange)->EndRef()),
+        mRangeRefPtr(aRange),
+        mRangeOwningNonNull(nullptr) {
+    mStartPointTracker.emplace(aRangeUpdater, &mStartPoint);
+    mEndPointTracker.emplace(aRangeUpdater, &mEndPoint);
+  }
+  AutoTrackDOMRange(RangeUpdater& aRangeUpdater, OwningNonNull<nsRange>* aRange)
+      : mStartPoint((*aRange)->StartRef()),
+        mEndPoint((*aRange)->EndRef()),
+        mRangeRefPtr(nullptr),
+        mRangeOwningNonNull(aRange) {
+    mStartPointTracker.emplace(aRangeUpdater, &mStartPoint);
+    mEndPointTracker.emplace(aRangeUpdater, &mEndPoint);
+  }
+  ~AutoTrackDOMRange() {
+    if (!mRangeRefPtr && !mRangeOwningNonNull) {
+      // The destructor of the trackers will update automatically.
+      return;
+    }
+    // Otherwise, destroy them now.
+    mStartPointTracker.reset();
+    mEndPointTracker.reset();
+    if (mRangeRefPtr) {
+      (*mRangeRefPtr)
+          ->SetStartAndEnd(mStartPoint.ToRawRangeBoundary(),
+                           mEndPoint.ToRawRangeBoundary());
+      return;
+    }
+    if (mRangeOwningNonNull) {
+      (*mRangeOwningNonNull)
+          ->SetStartAndEnd(mStartPoint.ToRawRangeBoundary(),
+                           mEndPoint.ToRawRangeBoundary());
+      return;
+    }
+  }
+
+ private:
+  Maybe<AutoTrackDOMPoint> mStartPointTracker;
+  Maybe<AutoTrackDOMPoint> mEndPointTracker;
+  EditorDOMPoint mStartPoint;
+  EditorDOMPoint mEndPoint;
+  RefPtr<nsRange>* mRangeRefPtr;
+  OwningNonNull<nsRange>* mRangeOwningNonNull;
+};
+
 /**
  * Another helper class for SelectionState.  Stack based class for doing
  * Will/DidReplaceContainer()
@@ -261,9 +328,10 @@ class MOZ_STACK_CLASS AutoReplaceContainerSelNotify final {
   AutoReplaceContainerSelNotify() = delete;
   // FYI: Marked as `MOZ_CAN_RUN_SCRIPT` for avoiding to use strong pointers
   //      for the members.
-  MOZ_CAN_RUN_SCRIPT AutoReplaceContainerSelNotify(
-      RangeUpdater& aRangeUpdater, dom::Element& aOriginalElement,
-      dom::Element& aNewElement)
+  MOZ_CAN_RUN_SCRIPT
+  AutoReplaceContainerSelNotify(RangeUpdater& aRangeUpdater,
+                                dom::Element& aOriginalElement,
+                                dom::Element& aNewElement)
       : mRangeUpdater(aRangeUpdater),
         mOriginalElement(aOriginalElement),
         mNewElement(aNewElement) {

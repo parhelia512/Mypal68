@@ -82,7 +82,7 @@ NS_IMETHODIMP CreateElementTransaction::DoTransaction() {
     return NS_ERROR_FAILURE;
   }
 
-  // Try to insert formatting whitespace for the new node:
+  // Try to insert formatting white-space for the new node:
   OwningNonNull<Element> newElement = *mNewElement;
   nsresult rv = editorBase->MarkElementDirty(newElement);
   if (NS_WARN_IF(rv == NS_ERROR_EDITOR_DESTROYED)) {
@@ -118,9 +118,9 @@ NS_IMETHODIMP CreateElementTransaction::DoTransaction() {
     return NS_ERROR_FAILURE;
   }
   IgnoredErrorResult ignoredError;
-  selection->Collapse(afterNewNode, ignoredError);
+  selection->CollapseInLimiter(afterNewNode, ignoredError);
   NS_WARNING_ASSERTION(!ignoredError.Failed(),
-                       "Selection::Collapse() failed, but ignored");
+                       "Selection::CollapseInLimiter() failed, but ignored");
   return NS_OK;
 }
 
@@ -144,6 +144,9 @@ void CreateElementTransaction::InsertNewNode(ErrorResult& aError) {
     container->InsertBefore(newElement, child, aError);
     NS_WARNING_ASSERTION(!aError.Failed(),
                          "nsINode::InsertBefore() failed, but ignored");
+    // InsertBefore() may call MightThrowJSException() even if there is no
+    // error. We don't need the flag here.
+    aError.WouldReportJSException();
     return;
   }
 

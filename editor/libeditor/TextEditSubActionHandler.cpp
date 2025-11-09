@@ -265,9 +265,10 @@ EditActionResult TextEditor::InsertLineFeedCharacterAtSelection() {
       !pointAfterInsertedLineFeed.GetChild(),
       "After inserting text into a text node, pointAfterInsertedLineFeed."
       "GetChild() should be nullptr");
-  rv = SelectionRefPtr()->Collapse(pointAfterInsertedLineFeed);
+  rv = MOZ_KnownLive(SelectionRefPtr())
+           ->CollapseInLimiter(pointAfterInsertedLineFeed);
   if (NS_FAILED(rv)) {
-    NS_WARNING("Selection::Collapse() failed");
+    NS_WARNING("Selection::CollapseInLimiter() failed");
     return EditActionIgnored(rv);
   }
 
@@ -345,11 +346,13 @@ nsresult TextEditor::EnsureCaretNotAtEndOfTextNode() {
     return NS_ERROR_FAILURE;
   }
   IgnoredErrorResult ignoredError;
-  SelectionRefPtr()->Collapse(afterStartContainer, ignoredError);
+  MOZ_KnownLive(SelectionRefPtr())
+      ->CollapseInLimiter(afterStartContainer, ignoredError);
   if (NS_WARN_IF(Destroyed())) {
     return NS_ERROR_EDITOR_DESTROYED;
   }
-  NS_WARNING_ASSERTION(!ignoredError.Failed(), "Selection::Collapse() failed");
+  NS_WARNING_ASSERTION(!ignoredError.Failed(),
+                       "Selection::CollapseInLimiter() failed");
   return ignoredError.StealNSResult();
 }
 
@@ -408,7 +411,7 @@ void TextEditor::HandleNewLinesInStringForSingleLineEditor(
           break;
         }
         uint32_t wsBegin = nextLF;
-        // look backwards for the first non-whitespace char
+        // look backwards for the first non-white-space char
         while (wsBegin > offset && NS_IS_SPACE(aString[wsBegin - 1])) {
           --wsBegin;
         }
@@ -505,7 +508,7 @@ EditActionResult TextEditor::HandleInsertText(
   // 2. replace newlines with spaces
   // 3. strip newlines
   // 4. replace with commas
-  // 5. strip newlines and surrounding whitespace
+  // 5. strip newlines and surrounding white-space
   // So find out what we're expected to do:
   if (IsSingleLineEditor()) {
     // XXX Some callers of TextEditor::InsertTextAsAction()  already make the
@@ -588,12 +591,14 @@ EditActionResult TextEditor::HandleInsertText(
           "After inserting text into a text node, pointAfterStringInserted."
           "GetChild() should be nullptr");
       ignoredError = IgnoredErrorResult();
-      SelectionRefPtr()->Collapse(pointAfterStringInserted, ignoredError);
+      MOZ_KnownLive(SelectionRefPtr())
+          ->CollapseInLimiter(pointAfterStringInserted, ignoredError);
       if (NS_WARN_IF(Destroyed())) {
         return EditActionHandled(NS_ERROR_EDITOR_DESTROYED);
       }
-      NS_WARNING_ASSERTION(!ignoredError.Failed(),
-                           "Selection::Collapse() failed, but ignored");
+      NS_WARNING_ASSERTION(
+          !ignoredError.Failed(),
+          "Selection::CollapseInLimiter() failed, but ignored");
     }
   }
 
@@ -799,25 +804,31 @@ EditActionResult TextEditor::HandleDeleteSelectionInternal(
     }
 
     // Test for distance between caret and text that will be deleted
-    EditActionResult result =
-        SetCaretBidiLevelForDeletion(selectionStartPoint, aDirectionAndAmount);
-    if (result.Failed() || result.Canceled()) {
-      NS_WARNING_ASSERTION(result.Succeeded(),
-                           "EditorBase::SetCaretBidiLevelForDeletion() failed");
-      return result;
+    AutoCaretBidiLevelManager bidiLevelManager(*this, aDirectionAndAmount,
+                                               selectionStartPoint);
+    if (bidiLevelManager.Failed()) {
+      NS_WARNING("EditorBase::AutoCaretBidiLevelManager() failed");
+      return EditActionResult(NS_ERROR_FAILURE);
+    }
+    bidiLevelManager.MaybeUpdateCaretBidiLevel(*this);
+    if (bidiLevelManager.Canceled()) {
+      return EditActionCanceled();
     }
   }
 
-  nsresult rv = ExtendSelectionForDelete(&aDirectionAndAmount);
-  if (NS_FAILED(rv)) {
-    NS_WARNING("TextEditor::ExtendSelectionForDelete() failed");
-    return EditActionResult(rv);
+  AutoRangeArray rangesToDelete(*SelectionRefPtr());
+  Result<nsIEditor::EDirection, nsresult> result =
+      rangesToDelete.ExtendAnchorFocusRangeFor(*this, aDirectionAndAmount);
+  if (result.isErr()) {
+    NS_WARNING("AutoRangeArray::ExtendAnchorFocusRangeFor() failed");
+    return EditActionResult(result.unwrapErr());
   }
 
-  rv = DeleteSelectionWithTransaction(aDirectionAndAmount, nsIEditor::eNoStrip);
+  nsresult rv = DeleteRangesWithTransaction(
+      result.unwrap(), nsIEditor::eNoStrip, rangesToDelete);
   NS_WARNING_ASSERTION(
       NS_SUCCEEDED(rv),
-      "EditorBase::DeleteSelectionWithTransaction(eNoStrip) failed");
+      "EditorBase::DeleteRangesWithTransaction(eNoStrip) failed");
   return EditActionHandled(rv);
 }
 
