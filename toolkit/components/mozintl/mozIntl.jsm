@@ -942,9 +942,9 @@ MozIntl.prototype.classID = Components.ID(
   "{35ec195a-e8d0-4300-83af-c8a2cc84b4a3}"
 );
 MozIntl.prototype.QueryInterface = ChromeUtils.generateQI([
-  Ci.mozIMozIntl,
-  Ci.nsIObserver,
-  Ci.nsISupportsWeakReference,
+  "mozIMozIntl",
+  "nsIObserver",
+  "nsISupportsWeakReference",
 ]);
 
 var EXPORTED_SYMBOLS = ["MozIntl"];

@@ -143,53 +143,46 @@ nsDoTestsForEditorWithAutoComplete.prototype = {
         this._is(
           events[i] instanceof this._window.InputEvent,
           true,
-          `${this._description}, ${aTest.description}: "${
-            events[i].type
-          }" event should be dispatched with InputEvent interface`
+          `${this._description}, ${aTest.description}: "${events[i].type}" event should be dispatched with InputEvent interface`
         );
+        let expectCancelable =
+          events[i].type === "beforeinput" &&
+          (aTest.inputEvents[i].inputType !== "insertReplacementText" ||
+            SpecialPowers.getBoolPref(
+              "dom.input_event.allow_to_cancel_set_user_input"
+            ));
+
         this._is(
           events[i].cancelable,
-          events[i].type === "beforeinput",
+          expectCancelable,
           `${this._description}, ${aTest.description}: "${
             events[i].type
-          }" event should ${
-            events[i].type === "beforeinput" ? "be" : "be never"
-          } cancelable`
+          }" event should ${expectCancelable ? "be" : "be never"} cancelable`
         );
         this._is(
           events[i].bubbles,
           true,
-          `${this._description}, ${aTest.description}: "${
-            events[i].type
-          }" event should always bubble`
+          `${this._description}, ${aTest.description}: "${events[i].type}" event should always bubble`
         );
         this._is(
           events[i].inputType,
           aTest.inputEvents[i].inputType,
-          `${this._description}, ${aTest.description}: inputType of "${
-            events[i].type
-          }" event should be "${aTest.inputEvents[i].inputType}"`
+          `${this._description}, ${aTest.description}: inputType of "${events[i].type}" event should be "${aTest.inputEvents[i].inputType}"`
         );
         this._is(
           events[i].data,
           aTest.inputEvents[i].data,
-          `${this._description}, ${aTest.description}: data of "${
-            events[i].type
-          }" event should be ${aTest.inputEvents[i].data}`
+          `${this._description}, ${aTest.description}: data of "${events[i].type}" event should be ${aTest.inputEvents[i].data}`
         );
         this._is(
           events[i].dataTransfer,
           null,
-          `${this._description}, ${aTest.description}: dataTransfer of "${
-            events[i].type
-          }" event should be null`
+          `${this._description}, ${aTest.description}: dataTransfer of "${events[i].type}" event should be null`
         );
         this._is(
           events[i].getTargetRanges().length,
           0,
-          `${this._description}, ${aTest.description}: getTargetRanges() of "${
-            events[i].type
-          }" event should return empty array`
+          `${this._description}, ${aTest.description}: getTargetRanges() of "${events[i].type}" event should return empty array`
         );
       }
     }

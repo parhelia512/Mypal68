@@ -5,7 +5,7 @@
 #include "Telemetry.h"
 #include "TelemetryOrigin.h"
 
-#include "nsDataHashtable.h"
+#include "nsTHashMap.h"
 #include "nsIObserverService.h"
 #include "nsPrintfCString.h"
 #include "nsTArray.h"
@@ -109,14 +109,14 @@ static StaticMutex gTelemetryOriginMutex;
 typedef nsTArray<Tuple<const char*, const char*>> OriginHashesList;
 UniquePtr<OriginHashesList> gOriginHashesList;
 
-typedef nsDataHashtable<nsCStringHashKey, size_t> OriginToIndexMap;
+typedef nsTHashMap<nsCStringHashKey, size_t> OriginToIndexMap;
 UniquePtr<OriginToIndexMap> gOriginToIndexMap;
 
-typedef nsDataHashtable<nsCStringHashKey, size_t> HashToIndexMap;
+typedef nsTHashMap<nsCStringHashKey, size_t> HashToIndexMap;
 UniquePtr<HashToIndexMap> gHashToIndexMap;
 
-typedef nsDataHashtable<nsCStringHashKey, uint32_t> OriginBag;
-typedef nsDataHashtable<OriginMetricIDHashKey, OriginBag> IdToOriginBag;
+typedef nsTHashMap<nsCStringHashKey, uint32_t> OriginBag;
+typedef nsTHashMap<OriginMetricIDHashKey, OriginBag> IdToOriginBag;
 
 UniquePtr<IdToOriginBag> gMetricToOriginBag;
 
@@ -136,11 +136,7 @@ typedef nsTArray<std::pair<OriginMetricID, nsTArray<nsTArray<bool>>>>
 // origins?"
 static uint32_t gPrioDatasPerMetric;
 
-// The number of "meta-origins": in-band metadata about origin telemetry.
-// Currently 1: the "unknown origin recorded" meta-origin.
-static uint32_t kNumMetaOrigins = 1;
-
-NS_NAMED_LITERAL_CSTRING(kUnknownOrigin, "__UNKNOWN__");
+constexpr auto kUnknownOrigin = "__UNKNOWN__"_ns;
 
 }  // namespace
 
@@ -170,21 +166,6 @@ uint32_t PrioDataCount(const StaticMutexAutoLock& lock) {
     count += gPrioDatasPerMetric * maxOriginCount;
   }
   return count;
-}
-
-// Takes the storage and turns it into bool arrays for Prio to encode, turning
-// { metric1: [origin1, origin2, ...], ...}
-// into
-// [(metric1, [[shard1], [shard2], ...]), ...]
-// Note: if an origin is present multiple times for a given metric, we must
-// generate multiple (id, boolvectors) pairs so that they are all reported.
-// Meaning
-// { metric1: [origin1, origin2, origin2] }
-// must turn into (with a pretend gNumBooleans of 1)
-// [(metric1, [[1], [1]]), (metric1, [[0], [1]])]
-nsresult AppEncodeTo(const StaticMutexAutoLock& lock,
-                     IdBoolsPairArray& aResult) {
-  return NS_ERROR_FAILURE;
 }
 
 }  // anonymous namespace
@@ -247,14 +228,14 @@ nsresult TelemetryOrigin::RecordOrigin(OriginMetricID aId,
       // Only record one unknown origin per metric per snapshot.
       // (otherwise we may get swamped and blow our data budget.)
       if (gMetricToOriginBag->Contains(aId) &&
-          gMetricToOriginBag->GetOrInsert(aId).Contains(kUnknownOrigin)) {
+          gMetricToOriginBag->LookupOrInsert(aId).Contains(kUnknownOrigin)) {
         return NS_OK;
       }
       origin = kUnknownOrigin;
     }
 
-    auto& originBag = gMetricToOriginBag->GetOrInsert(aId);
-    originBag.GetOrInsert(origin)++;
+    auto& originBag = gMetricToOriginBag->LookupOrInsert(aId);
+    originBag.LookupOrInsert(origin)++;
 
     prioDataCount = PrioDataCount(locker);
   }
@@ -285,13 +266,8 @@ nsresult TelemetryOrigin::GetOriginSnapshot(bool aClear, JSContext* aCx,
 
       gMetricToOriginBag->SwapElements(copy);
     } else {
-      auto iter = gMetricToOriginBag->ConstIter();
-      for (; !iter.Done(); iter.Next()) {
-        OriginBag& bag = copy.GetOrInsert(iter.Key());
-        auto originIt = iter.Data().ConstIter();
-        for (; !originIt.Done(); originIt.Next()) {
-          bag.Put(originIt.Key(), originIt.Data());
-        }
+      for (const auto& entry : *gMetricToOriginBag) {
+        copy.InsertOrUpdate(entry.GetKey(), entry.GetData().Clone());
       }
     }
   }

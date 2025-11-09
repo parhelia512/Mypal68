@@ -12,8 +12,8 @@ function RemoteController(browser) {
 
 RemoteController.prototype = {
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIController,
-    Ci.nsICommandController,
+    "nsIController",
+    "nsICommandController",
   ]),
 
   isCommandEnabled(aCommand) {

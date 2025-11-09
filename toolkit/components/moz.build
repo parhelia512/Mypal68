@@ -10,7 +10,6 @@ if CONFIG['MOZ_HAS_REMOTE']:
     DIRS += ['remote']
 
 DIRS += [
-    'aboutcache',
     'aboutcheckerboard',
     'aboutmemory',
     'aboutperformance',

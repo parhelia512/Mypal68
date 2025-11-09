@@ -70,7 +70,7 @@ nsContentDispatchChooser.prototype = {
 
   // nsISupports
 
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIContentDispatchChooser]),
+  QueryInterface: ChromeUtils.generateQI(["nsIContentDispatchChooser"]),
 };
 
 var EXPORTED_SYMBOLS = ["nsContentDispatchChooser"];

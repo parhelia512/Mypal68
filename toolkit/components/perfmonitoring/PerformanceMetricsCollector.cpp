@@ -238,14 +238,15 @@ PerformanceMetricsCollector::RequestMetricsInternal() {
   LOG(("[%s] Expecting %d results back", nsIDToCString(uuid).get(),
        numResultsRequired));
   results->SetNumResultsRequired(numResultsRequired);
-  mAggregatedResults.Put(uuid, std::move(results));
+  const auto& aggregatedResult =
+      mAggregatedResults.InsertOrUpdate(uuid, std::move(results));
 
   // calling all content processes via IPDL (async)
   for (uint32_t i = 0; i < numChildren; i++) {
     if (NS_WARN_IF(!children[i]->SendRequestPerformanceMetrics(uuid))) {
       LOG(("[%s] Failed to send request to child %d", nsIDToCString(uuid).get(),
            i));
-      mAggregatedResults.GetValue(uuid)->get()->Abort(NS_ERROR_FAILURE);
+      aggregatedResult->Abort(NS_ERROR_FAILURE);
       return RequestMetricsPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
     }
     LOG(("[%s] Request sent to child %d", nsIDToCString(uuid).get(), i));
@@ -287,7 +288,7 @@ nsresult PerformanceMetricsCollector::DataReceived(
 nsresult PerformanceMetricsCollector::DataReceivedInternal(
     const nsID& aUUID, const nsTArray<PerformanceInfo>& aMetrics) {
   MOZ_ASSERT(gInstance == this);
-  UniquePtr<AggregatedResults>* results = mAggregatedResults.GetValue(aUUID);
+  auto results = mAggregatedResults.Lookup(aUUID);
   if (!results) {
     LOG(("[%s] UUID is gone from mAggregatedResults",
          nsIDToCString(aUUID).get()));

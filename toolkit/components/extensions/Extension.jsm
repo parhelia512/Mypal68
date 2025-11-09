@@ -59,14 +59,11 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PluralForm: "resource://gre/modules/PluralForm.jsm",
   Schemas: "resource://gre/modules/Schemas.jsm",
   XPIProvider: "resource://gre/modules/addons/XPIProvider.jsm",
-});
 
-// This is used for manipulating jar entry paths, which always use Unix
-// separators.
-XPCOMUtils.defineLazyGetter(this, "OSPath", () => {
-  let obj = {};
-  ChromeUtils.import("resource://gre/modules/osfile/ospath_unix.jsm", obj);
-  return obj;
+  // These are used for manipulating jar entry paths, which always use Unix
+  // separators.
+  basename: "resource://gre/modules/osfile/ospath_unix.jsm",
+  dirname: "resource://gre/modules/osfile/ospath_unix.jsm",
 });
 
 XPCOMUtils.defineLazyGetter(this, "resourceProtocol", () =>
@@ -971,11 +968,11 @@ class ExtensionData {
       for (let [lang, path] of Object.entries(manifest.dictionaries)) {
         path = path.replace(/^\/+/, "");
 
-        let dir = OSPath.dirname(path);
+        let dir = dirname(path);
         if (dir === ".") {
           dir = "";
         }
-        let leafName = OSPath.basename(path);
+        let leafName = basename(path);
         let affixPath = leafName.slice(0, -3) + "aff";
 
         let entries = Array.from(

@@ -280,7 +280,7 @@ nsFormFillController::MarkAsLoginManagerField(HTMLInputElement* aInput) {
     return NS_OK;
   }
 
-  mPwmgrInputs.Put(aInput, true);
+  mPwmgrInputs.InsertOrUpdate(aInput, true);
   aInput->AddMutationObserverUnlessExists(this);
 
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
@@ -316,7 +316,7 @@ nsFormFillController::MarkAsAutofillField(HTMLInputElement* aInput) {
     return NS_OK;
   }
 
-  mAutofillInputs.Put(aInput, true);
+  mAutofillInputs.InsertOrUpdate(aInput, true);
   aInput->AddMutationObserverUnlessExists(this);
 
   aInput->EnablePreview();

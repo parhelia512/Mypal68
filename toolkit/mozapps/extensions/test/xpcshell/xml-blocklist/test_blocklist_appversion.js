@@ -276,7 +276,7 @@ async function loadBlocklist(file) {
   await blocklistUpdated;
 }
 
-let factory = XPCOMUtils.generateSingletonFactory(function() {
+let factory = ComponentUtils.generateSingletonFactory(function() {
   return BlocklistPrompt;
 });
 Cm.registerFactory(

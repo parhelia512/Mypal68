@@ -1241,14 +1241,6 @@ set_define('MOZ_VERIFY_MAR_SIGNATURE',
 set_config('MOZ_VERIFY_MAR_SIGNATURE',
            depends_if('--enable-verify-mar')(lambda _: True))
 
-# TaskTracer
-# ==============================================================
-
-option('--enable-tasktracer', help='Enable TaskTracer')
-
-set_define('MOZ_TASK_TRACER', depends_if('--enable-tasktracer')(lambda _: True))
-set_config('MOZ_TASK_TRACER', depends_if('--enable-tasktracer')(lambda _: True))
-
 # Reflow counting
 # ==============================================================
 
@@ -1898,3 +1890,9 @@ def android_package_name(value, moz_app_name):
     return 'org.mozilla.%s' % moz_app_name
 
 set_config('ANDROID_PACKAGE_NAME', android_package_name)
+
+# DOM Streams
+# ==============================================================
+# Set this to true so the JS engine knows we're doing a browser build.
+set_config("MOZ_DOM_STREAMS", True)
+set_define("MOZ_DOM_STREAMS", True)

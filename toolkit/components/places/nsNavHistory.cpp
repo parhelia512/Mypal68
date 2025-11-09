@@ -15,7 +15,7 @@
 #include "nsFaviconService.h"
 #include "nsPlacesMacros.h"
 #include "nsPlacesTriggers.h"
-#include "DateTimeFormat.h"
+#include "mozilla/intl/AppDateTimeFormat.h"
 #include "History.h"
 #include "Helpers.h"
 #include "NotifyRankingChanged.h"
@@ -267,6 +267,9 @@ class FixAndDecayFrecencyRunnable final : public Runnable {
 
     mozStorageTransaction transaction(
         mDB->MainConn(), false, mozIStorageConnection::TRANSACTION_IMMEDIATE);
+
+    // XXX Handle the error, bug 1696133.
+    Unused << NS_WARN_IF(NS_FAILED(transaction.Start()));
 
     if (NS_WARN_IF(NS_FAILED(DecayFrecencies()))) {
       mDecayReason = mozIStorageStatementCallback::REASON_ERROR;
@@ -820,7 +823,7 @@ nsNavHistory::MarkPageAsFollowedBookmark(nsIURI* aURI) {
   nsresult rv = aURI->GetSpec(uriString);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  mRecentBookmark.Put(uriString, GetNow());
+  mRecentBookmark.InsertOrUpdate(uriString, GetNow());
 
   if (mRecentBookmark.Count() > RECENT_EVENT_QUEUE_MAX_LENGTH)
     ExpireNonrecentEvents(&mRecentBookmark);
@@ -1369,7 +1372,7 @@ nsresult PlacesSQLQueryBuilder::SelectAsDay() {
     }
 
     nsPrintfCString dateParam("dayTitle%d", i);
-    mAddParams.Put(dateParam, dateName);
+    mAddParams.InsertOrUpdate(dateParam, dateName);
 
     nsPrintfCString dayRange(
         "SELECT :%s AS dayTitle, "
@@ -1406,7 +1409,7 @@ nsresult PlacesSQLQueryBuilder::SelectAsSite() {
   NS_ENSURE_STATE(history);
 
   history->GetStringFromName("localhost", localFiles);
-  mAddParams.Put("localhost"_ns, localFiles);
+  mAddParams.InsertOrUpdate("localhost"_ns, localFiles);
 
   // If there are additional conditions the query has to join on visits too.
   nsAutoCString visitsJoin;
@@ -1492,18 +1495,18 @@ nsresult PlacesSQLQueryBuilder::SelectAsRoots() {
   nsAutoCString unfiledTitle;
 
   history->GetStringFromName("BookmarksToolbarFolderTitle", toolbarTitle);
-  mAddParams.Put("BookmarksToolbarFolderTitle"_ns, toolbarTitle);
+  mAddParams.InsertOrUpdate("BookmarksToolbarFolderTitle"_ns, toolbarTitle);
   history->GetStringFromName("BookmarksMenuFolderTitle", menuTitle);
-  mAddParams.Put("BookmarksMenuFolderTitle"_ns, menuTitle);
+  mAddParams.InsertOrUpdate("BookmarksMenuFolderTitle"_ns, menuTitle);
   history->GetStringFromName("OtherBookmarksFolderTitle", unfiledTitle);
-  mAddParams.Put("OtherBookmarksFolderTitle"_ns, unfiledTitle);
+  mAddParams.InsertOrUpdate("OtherBookmarksFolderTitle"_ns, unfiledTitle);
 
   nsAutoCString mobileString;
 
   if (Preferences::GetBool(MOBILE_BOOKMARKS_PREF, false)) {
     nsAutoCString mobileTitle;
     history->GetStringFromName("MobileBookmarksFolderTitle", mobileTitle);
-    mAddParams.Put("MobileBookmarksFolderTitle"_ns, mobileTitle);
+    mAddParams.InsertOrUpdate("MobileBookmarksFolderTitle"_ns, mobileTitle);
 
     mobileString = nsLiteralCString(
         ","
@@ -1540,13 +1543,13 @@ nsresult PlacesSQLQueryBuilder::SelectAsLeftPane() {
   nsAutoCString allBookmarksTitle;
 
   history->GetStringFromName("OrganizerQueryHistory", historyTitle);
-  mAddParams.Put("OrganizerQueryHistory"_ns, historyTitle);
+  mAddParams.InsertOrUpdate("OrganizerQueryHistory"_ns, historyTitle);
   history->GetStringFromName("OrganizerQueryDownloads", downloadsTitle);
-  mAddParams.Put("OrganizerQueryDownloads"_ns, downloadsTitle);
+  mAddParams.InsertOrUpdate("OrganizerQueryDownloads"_ns, downloadsTitle);
   history->GetStringFromName("TagsFolderTitle", tagsTitle);
-  mAddParams.Put("TagsFolderTitle"_ns, tagsTitle);
+  mAddParams.InsertOrUpdate("TagsFolderTitle"_ns, tagsTitle);
   history->GetStringFromName("OrganizerQueryAllBookmarks", allBookmarksTitle);
-  mAddParams.Put("OrganizerQueryAllBookmarks"_ns, allBookmarksTitle);
+  mAddParams.InsertOrUpdate("OrganizerQueryAllBookmarks"_ns, allBookmarksTitle);
 
   mQueryString = nsPrintfCString(
       "SELECT * FROM ("
@@ -1886,8 +1889,9 @@ nsresult nsNavHistory::GetQueryResults(
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  for (auto iter = addParams.Iter(); !iter.Done(); iter.Next()) {
-    nsresult rv = statement->BindUTF8StringByName(iter.Key(), iter.Data());
+  for (const auto& entry : addParams) {
+    nsresult rv =
+        statement->BindUTF8StringByName(entry.GetKey(), entry.GetData());
     if (NS_FAILED(rv)) {
       break;
     }
@@ -1935,7 +1939,7 @@ nsNavHistory::MarkPageAsTyped(nsIURI* aURI) {
   nsresult rv = aURI->GetSpec(uriString);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  mRecentTyped.Put(uriString, GetNow());
+  mRecentTyped.InsertOrUpdate(uriString, GetNow());
 
   if (mRecentTyped.Count() > RECENT_EVENT_QUEUE_MAX_LENGTH)
     ExpireNonrecentEvents(&mRecentTyped);
@@ -1960,7 +1964,7 @@ nsNavHistory::MarkPageAsFollowedLink(nsIURI* aURI) {
   nsresult rv = aURI->GetSpec(uriString);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  mRecentLink.Put(uriString, GetNow());
+  mRecentLink.InsertOrUpdate(uriString, GetNow());
 
   if (mRecentLink.Count() > RECENT_EVENT_QUEUE_MAX_LENGTH)
     ExpireNonrecentEvents(&mRecentLink);
@@ -2078,8 +2082,9 @@ nsNavHistory::AsyncExecuteLegacyQuery(nsINavHistoryQuery* aQuery,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  for (auto iter = addParams.Iter(); !iter.Done(); iter.Next()) {
-    nsresult rv = statement->BindUTF8StringByName(iter.Key(), iter.Data());
+  for (const auto& entry : addParams) {
+    nsresult rv =
+        statement->BindUTF8StringByName(entry.GetKey(), entry.GetData());
     if (NS_FAILED(rv)) {
       break;
     }
@@ -3087,9 +3092,11 @@ void nsNavHistory::GetStringFromName(const char* aName, nsACString& aResult) {
 void nsNavHistory::GetMonthName(const PRExplodedTime& aTime,
                                 nsACString& aResult) {
   nsAutoString month;
-  nsresult rv = mozilla::DateTimeFormat::GetCalendarSymbol(
-      mozilla::DateTimeFormat::Field::Month,
-      mozilla::DateTimeFormat::Style::Wide, &aTime, month);
+
+  mozilla::intl::DateTimeFormat::ComponentsBag components;
+  components.month = Some(mozilla::intl::DateTimeFormat::Month::Long);
+  nsresult rv =
+      mozilla::intl::AppDateTimeFormat::Format(components, &aTime, month);
   if (NS_FAILED(rv)) {
     aResult = nsPrintfCString("[%d]", aTime.tm_month + 1);
     return;
@@ -3101,8 +3108,11 @@ void nsNavHistory::GetMonthName(const PRExplodedTime& aTime,
 void nsNavHistory::GetMonthYear(const PRExplodedTime& aTime,
                                 nsACString& aResult) {
   nsAutoString monthYear;
-  nsresult rv = mozilla::DateTimeFormat::FormatDateTime(
-      &aTime, DateTimeFormat::Skeleton::yyyyMMMM, monthYear);
+  mozilla::intl::DateTimeFormat::ComponentsBag components;
+  components.month = Some(mozilla::intl::DateTimeFormat::Month::Long);
+  components.year = Some(mozilla::intl::DateTimeFormat::Numeric::Numeric);
+  nsresult rv =
+      mozilla::intl::AppDateTimeFormat::Format(components, &aTime, monthYear);
   if (NS_FAILED(rv)) {
     aResult = nsPrintfCString("[%d-%d]", aTime.tm_month + 1, aTime.tm_year);
     return;

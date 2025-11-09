@@ -29,8 +29,8 @@ function installAddonEngine(name = "engine-addon") {
 
   Services.dirsvc.registerProvider({
     QueryInterface: ChromeUtils.generateQI([
-      Ci.nsIDirectoryServiceProvider,
-      Ci.nsIDirectoryServiceProvider2,
+      "nsIDirectoryServiceProvider",
+      "nsIDirectoryServiceProvider2",
     ]),
 
     getFile(prop, persistant) {

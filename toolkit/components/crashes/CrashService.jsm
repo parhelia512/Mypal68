@@ -4,13 +4,17 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm", this);
-ChromeUtils.import("resource://gre/modules/AsyncShutdown.jsm", this);
+const { AppConstants } = ChromeUtils.import(
+  "resource://gre/modules/AppConstants.jsm"
+);
+const { AsyncShutdown } = ChromeUtils.import(
+  "resource://gre/modules/AsyncShutdown.jsm"
+);
 const { parseKeyValuePairs } = ChromeUtils.import(
   "resource://gre/modules/KeyValueParser.jsm"
 );
-ChromeUtils.import("resource://gre/modules/osfile.jsm", this);
-ChromeUtils.import("resource://gre/modules/Services.jsm", this);
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { OS } = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 // Set to true if the application is quitting
 var gQuitting = false;
@@ -159,7 +163,7 @@ this.CrashService = function() {
 
 CrashService.prototype = Object.freeze({
   classID: Components.ID("{92668367-1b17-4190-86b2-1061b2179744}"),
-  QueryInterface: ChromeUtils.generateQI([Ci.nsICrashService, Ci.nsIObserver]),
+  QueryInterface: ChromeUtils.generateQI(["nsICrashService", "nsIObserver"]),
 
   async addCrash(processType, crashType, id) {
     switch (processType) {

@@ -9,17 +9,19 @@ const myScope = this;
 const { parseKeyValuePairsFromLines } = ChromeUtils.import(
   "resource://gre/modules/KeyValueParser.jsm"
 );
-ChromeUtils.import("resource://gre/modules/Log.jsm", this);
-ChromeUtils.import("resource://gre/modules/osfile.jsm", this);
+const { Log } = ChromeUtils.import("resource://gre/modules/Log.jsm");
+const { OS } = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 const { PromiseUtils } = ChromeUtils.import(
   "resource://gre/modules/PromiseUtils.jsm"
 );
-ChromeUtils.import("resource://gre/modules/Services.jsm", this);
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const { TelemetryController } = ChromeUtils.import(
   "resource://gre/modules/TelemetryController.jsm"
 );
-ChromeUtils.import("resource://gre/modules/Timer.jsm", this);
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
+const { setTimeout } = ChromeUtils.import("resource://gre/modules/Timer.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 
 var EXPORTED_SYMBOLS = ["CrashManager", "getCrashManager"];
 

@@ -289,18 +289,18 @@ static nsresult GetSystemParentDirectory(nsIFile** aFile) {
   rv = GetOSXFolderType(kOnSystemDisk, kApplicationSupportFolderType,
                         getter_AddRefs(localDir));
   if (NS_SUCCEEDED(rv)) {
-    rv = localDir->AppendNative(NS_LITERAL_CSTRING("Mypal68"));
+    rv = localDir->AppendNative("Mypal68"_ns);
   }
 #  else
-  NS_NAMED_LITERAL_CSTRING(dirname,
+  constexpr auto dirname =
 #    ifdef HAVE_USR_LIB64_DIR
-                           "/usr/lib64/mypal68"
+      "/usr/lib64/mypal68"_ns
 #    elif defined(__OpenBSD__) || defined(__FreeBSD__)
-                           "/usr/local/lib/mypal68"
+      "/usr/local/lib/mypal68"_ns
 #    else
-                           "/usr/lib/mypal68"
+      "/usr/lib/mypal68"_ns
 #    endif
-  );
+      ;
   rv = NS_NewNativeLocalFile(dirname, false, getter_AddRefs(localDir));
 #  endif
 
@@ -1593,13 +1593,13 @@ nsresult nsXREDirProvider::GetSystemExtensionsDirectory(nsIFile** aFile) {
 
   rv = GetSystemParentDirectory(getter_AddRefs(localDir));
   if (NS_SUCCEEDED(rv)) {
-    NS_NAMED_LITERAL_CSTRING(sExtensions,
+    constexpr auto sExtensions =
 #  if defined(XP_MACOSX)
-                             "Extensions"
+        "Extensions"_ns
 #  else
-                             "extensions"
+        "extensions"_ns
 #  endif
-    );
+        ;
 
     rv = localDir->AppendNative(sExtensions);
     if (NS_SUCCEEDED(rv)) {

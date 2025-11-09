@@ -27,8 +27,8 @@ class FormSubmitChild extends ActorChild {
     super(dispatcher);
 
     this.QueryInterface = ChromeUtils.generateQI([
-      Ci.nsIObserver,
-      Ci.nsISupportsWeakReference,
+      "nsIObserver",
+      "nsISupportsWeakReference",
     ]);
 
     Services.prefs.addObserver("browser.formfill.", this);

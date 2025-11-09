@@ -928,9 +928,9 @@ nsPlacesExpiration.prototype = {
   classID: Components.ID("705a423f-2f69-42f3-b9fe-1517e0dee56f"),
 
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIObserver,
-    Ci.nsITimerCallback,
-    Ci.nsISupportsWeakReference,
+    "nsIObserver",
+    "nsITimerCallback",
+    "nsISupportsWeakReference",
   ]),
 };
 

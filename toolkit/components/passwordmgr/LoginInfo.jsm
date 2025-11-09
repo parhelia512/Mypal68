@@ -16,10 +16,7 @@ function nsLoginInfo() {}
 
 nsLoginInfo.prototype = {
   classID: Components.ID("{0f2f347c-1e4f-40cc-8efd-792dea70a85e}"),
-  QueryInterface: ChromeUtils.generateQI([
-    Ci.nsILoginInfo,
-    Ci.nsILoginMetaInfo,
-  ]),
+  QueryInterface: ChromeUtils.generateQI(["nsILoginInfo", "nsILoginMetaInfo"]),
 
   //
   // nsILoginInfo interfaces...

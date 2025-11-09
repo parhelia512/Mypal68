@@ -593,8 +593,7 @@ nsresult XRE_InitChildProcess(int aArgc, char* aArgv[],
 #  endif
     printf_stderr(
         "\n\nCHILDCHILDCHILDCHILD (process type %s)\n  debug me @ %d\n\n",
-        XRE_GeckoProcessTypeToString(XRE_GetProcessType()),
-        base::GetCurrentProcId());
+        XRE_GetProcessTypeString(), base::GetCurrentProcId());
     sleep(GetDebugChildPauseTime());
   }
 #elif defined(OS_WIN)
@@ -605,8 +604,7 @@ nsresult XRE_InitChildProcess(int aArgc, char* aArgv[],
   } else if (PR_GetEnv("MOZ_DEBUG_CHILD_PAUSE")) {
     printf_stderr(
         "\n\nCHILDCHILDCHILDCHILD (process type %s)\n  debug me @ %d\n\n",
-        XRE_GeckoProcessTypeToString(XRE_GetProcessType()),
-        base::GetCurrentProcId());
+        XRE_GetProcessTypeString(), base::GetCurrentProcId());
     ::Sleep(GetDebugChildPauseTime());
   }
 #endif
@@ -974,8 +972,8 @@ TestShellParent* GetOrCreateTestShellParent() {
     // this and you're sure you wouldn't be better off writing a "browser"
     // chrome mochitest where you can have multiple types of content
     // processes.
-    RefPtr<ContentParent> parent = ContentParent::GetNewOrUsedBrowserProcess(
-        nullptr, NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE));
+    RefPtr<ContentParent> parent =
+        ContentParent::GetNewOrUsedBrowserProcess(nullptr, DEFAULT_REMOTE_TYPE);
     parent.forget(&gContentParent);
   } else if (!gContentParent->IsAlive()) {
     return nullptr;

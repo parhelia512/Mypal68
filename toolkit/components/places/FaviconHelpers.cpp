@@ -819,8 +819,13 @@ AsyncAssociateIconToPage::Run() {
 
   RefPtr<Database> DB = Database::GetDatabase();
   NS_ENSURE_STATE(DB);
+
   mozStorageTransaction transaction(
       DB->MainConn(), false, mozIStorageConnection::TRANSACTION_IMMEDIATE);
+
+  // XXX Handle the error, bug 1696133.
+  Unused << NS_WARN_IF(NS_FAILED(transaction.Start()));
+
   nsresult rv;
   if (shouldUpdateIcon) {
     rv = SetIconInfo(DB, mIcon);
@@ -1051,6 +1056,10 @@ AsyncReplaceFaviconData::Run() {
 
   mozStorageTransaction transaction(
       DB->MainConn(), false, mozIStorageConnection::TRANSACTION_IMMEDIATE);
+
+  // XXX Handle the error, bug 1696133.
+  Unused << NS_WARN_IF(NS_FAILED(transaction.Start()));
+
   nsresult rv = SetIconInfo(DB, mIcon, true);
   if (rv == NS_ERROR_NOT_AVAILABLE) {
     // There's no previous icon to replace, we don't need to do anything.

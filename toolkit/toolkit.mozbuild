@@ -70,6 +70,7 @@ if CONFIG['MOZ_UPDATER'] and CONFIG['OS_TARGET'] != 'Android':
 DIRS += [
     '/ipc',
     '/hal',
+    '/js/loader',
     '/js/xpconnect',
     '/intl/chardet',
     '/modules/libjar',
@@ -191,7 +192,7 @@ if CONFIG['ENABLE_TESTS']:
     if CONFIG['MOZ_MEMORY']:
         DIRS += ['/memory/gtest']
 
-    if CONFIG['MOZ_WEBRTC'] and not CONFIG['MOZ_TASK_TRACER']:
+    if CONFIG['MOZ_WEBRTC']:
         DIRS += [
             '/media/mtransport/test',
         ]

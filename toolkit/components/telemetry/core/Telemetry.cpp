@@ -51,7 +51,7 @@
 #include "nsClassHashtable.h"
 #include "nsCOMArray.h"
 #include "nsCOMPtr.h"
-#include "nsDataHashtable.h"
+#include "nsTHashMap.h"
 #include "nsHashKeys.h"
 #include "nsIDirectoryEnumerator.h"
 #include "nsIFileStreams.h"
@@ -586,7 +586,7 @@ TelemetryImpl::GetSnapshotForHistograms(const nsACString& aStoreName,
                                         bool aClearStore, bool aFilterTest,
                                         JSContext* aCx,
                                         JS::MutableHandleValue aResult) {
-  NS_NAMED_LITERAL_CSTRING(defaultStore, "main");
+  constexpr auto defaultStore = "main"_ns;
   unsigned int dataset = mCanRecordExtended
                              ? nsITelemetry::DATASET_PRERELEASE_CHANNELS
                              : nsITelemetry::DATASET_ALL_CHANNELS;
@@ -600,7 +600,7 @@ TelemetryImpl::GetSnapshotForKeyedHistograms(const nsACString& aStoreName,
                                              bool aClearStore, bool aFilterTest,
                                              JSContext* aCx,
                                              JS::MutableHandleValue aResult) {
-  NS_NAMED_LITERAL_CSTRING(defaultStore, "main");
+  constexpr auto defaultStore = "main"_ns;
   unsigned int dataset = mCanRecordExtended
                              ? nsITelemetry::DATASET_PRERELEASE_CHANNELS
                              : nsITelemetry::DATASET_ALL_CHANNELS;
@@ -614,7 +614,7 @@ TelemetryImpl::GetSnapshotForScalars(const nsACString& aStoreName,
                                      bool aClearStore, bool aFilterTest,
                                      JSContext* aCx,
                                      JS::MutableHandleValue aResult) {
-  NS_NAMED_LITERAL_CSTRING(defaultStore, "main");
+  constexpr auto defaultStore = "main"_ns;
   unsigned int dataset = mCanRecordExtended
                              ? nsITelemetry::DATASET_PRERELEASE_CHANNELS
                              : nsITelemetry::DATASET_ALL_CHANNELS;
@@ -628,7 +628,7 @@ TelemetryImpl::GetSnapshotForKeyedScalars(const nsACString& aStoreName,
                                           bool aClearStore, bool aFilterTest,
                                           JSContext* aCx,
                                           JS::MutableHandleValue aResult) {
-  NS_NAMED_LITERAL_CSTRING(defaultStore, "main");
+  constexpr auto defaultStore = "main"_ns;
   unsigned int dataset = mCanRecordExtended
                              ? nsITelemetry::DATASET_PRERELEASE_CHANNELS
                              : nsITelemetry::DATASET_ALL_CHANNELS;
@@ -702,7 +702,7 @@ class GetLoadedModulesResultRunnable final : public Runnable {
   SharedLibraryInfo mRawModules;
   nsCOMPtr<nsIThread> mWorkerThread;
 #  if defined(XP_WIN)
-  nsDataHashtable<nsStringHashKey, nsString> mCertSubjects;
+  nsTHashMap<nsStringHashKey, nsString> mCertSubjects;
 #  endif  // defined(XP_WIN)
 
  public:
@@ -820,8 +820,7 @@ class GetLoadedModulesResultRunnable final : public Runnable {
 
 #  if defined(XP_WIN)
       // Cert Subject.
-      nsString* subject = mCertSubjects.GetValue(info.GetModulePath());
-      if (subject) {
+      if (auto subject = mCertSubjects.Lookup(info.GetModulePath())) {
         JS::RootedString jsOrg(cx, ToJSString(cx, *subject));
         if (!jsOrg) {
           mPromise->MaybeReject(NS_ERROR_FAILURE);
@@ -863,8 +862,8 @@ class GetLoadedModulesResultRunnable final : public Runnable {
 
       auto orgName = dllSvc->GetBinaryOrgName(info.GetModulePath().get());
       if (orgName) {
-        mCertSubjects.Put(info.GetModulePath(),
-                          nsDependentString(orgName.get()));
+        mCertSubjects.InsertOrUpdate(info.GetModulePath(),
+                                     nsDependentString(orgName.get()));
       }
     }*/
   }
@@ -1011,7 +1010,7 @@ void TelemetryImpl::ReadLateWritesStacks(nsIFile* aProfileDir) {
     return;
   }
 
-  NS_NAMED_LITERAL_STRING(prefix, "Telemetry.LateWriteFinal-");
+  constexpr auto prefix = u"Telemetry.LateWriteFinal-"_ns;
   nsCOMPtr<nsIFile> file;
   while (NS_SUCCEEDED(files->GetNextFile(getter_AddRefs(file))) && file) {
     nsAutoString leafName;

@@ -4,8 +4,10 @@
 
 const THUMBNAIL_DIRECTORY = "thumbnails";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", this);
-ChromeUtils.import("resource://gre/modules/osfile.jsm", this);
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
+const { OS } = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "gCryptoHash", function() {
   return Cc["@mozilla.org/security/hash;1"].createInstance(Ci.nsICryptoHash);
@@ -22,7 +24,7 @@ function PageThumbsStorageService() {}
 
 PageThumbsStorageService.prototype = {
   classID: Components.ID("{97943eec-0e48-49ef-b7b7-cf4aa0109bb6}"),
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIPageThumbsStorageService]),
+  QueryInterface: ChromeUtils.generateQI(["nsIPageThumbsStorageService"]),
   // The path for the storage
   _path: null,
   get path() {

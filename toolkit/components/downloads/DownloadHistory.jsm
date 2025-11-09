@@ -324,7 +324,7 @@ var DownloadCache = {
     }
   },
 
-  QueryInterface: ChromeUtils.generateQI([Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI(["nsISupportsWeakReference"]),
 
   handlePlacesEvents(events) {
     for (const event of events) {

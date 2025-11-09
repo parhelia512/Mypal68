@@ -87,9 +87,9 @@ let gLastRightClickTimeStamp = Number.NEGATIVE_INFINITY;
 
 const observer = {
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIObserver,
-    Ci.nsIWebProgressListener,
-    Ci.nsISupportsWeakReference,
+    "nsIObserver",
+    "nsIWebProgressListener",
+    "nsISupportsWeakReference",
   ]),
 
   // nsIWebProgressListener

@@ -14,6 +14,7 @@
 #include "nsAtom.h"
 
 namespace mozilla {
+
 namespace ipc {
 template <class T>
 class Endpoint;
@@ -24,8 +25,6 @@ namespace extensions {
 class PStreamFilterChild;
 class StreamFilterChild;
 
-using namespace mozilla::dom;
-
 class StreamFilter : public DOMEventTargetHelper {
   friend class StreamFilterChild;
 
@@ -33,7 +32,7 @@ class StreamFilter : public DOMEventTargetHelper {
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(StreamFilter,
                                                          DOMEventTargetHelper)
 
-  static already_AddRefed<StreamFilter> Create(GlobalObject& global,
+  static already_AddRefed<StreamFilter> Create(dom::GlobalObject& global,
                                                uint64_t aRequestId,
                                                const nsAString& aAddonId);
 
@@ -45,11 +44,11 @@ class StreamFilter : public DOMEventTargetHelper {
   IMPL_EVENT_HANDLER(data);
   IMPL_EVENT_HANDLER(error);
 
-  void Write(const ArrayBufferOrUint8Array& aData, ErrorResult& aRv);
+  void Write(const dom::ArrayBufferOrUint8Array& aData, ErrorResult& aRv);
 
   void GetError(nsAString& aError) { aError = mError; }
 
-  StreamFilterStatus Status() const;
+  dom::StreamFilterStatus Status() const;
   void Suspend(ErrorResult& aRv);
   void Resume(ErrorResult& aRv);
   void Disconnect(ErrorResult& aRv);

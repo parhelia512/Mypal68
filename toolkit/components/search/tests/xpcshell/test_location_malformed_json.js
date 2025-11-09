@@ -5,7 +5,7 @@
 function promiseTimezoneMessage() {
   return new Promise(resolve => {
     let listener = {
-      QueryInterface: ChromeUtils.generateQI([Ci.nsIConsoleListener]),
+      QueryInterface: ChromeUtils.generateQI(["nsIConsoleListener"]),
       observe(msg) {
         if (
           msg.message.startsWith(

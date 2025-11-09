@@ -203,7 +203,7 @@ add_task(async function test_set_responseHeaders() {
     });
 
     channel.asyncOpen({
-      QueryInterface: ChromeUtils.generateQI([Ci.nsIStreamListener]),
+      QueryInterface: ChromeUtils.generateQI(["nsIStreamListener"]),
 
       onStartRequest(request) {
         request.QueryInterface(Ci.nsIHttpChannel);

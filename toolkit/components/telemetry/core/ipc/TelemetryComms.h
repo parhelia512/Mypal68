@@ -5,7 +5,7 @@
 #ifndef Telemetry_Comms_h__
 #define Telemetry_Comms_h__
 
-#include "ipc/IPCMessageUtils.h"
+#include "ipc/IPCMessageUtilsSpecializations.h"
 #include "mozilla/TelemetryProcessEnums.h"
 #include "mozilla/TimeStamp.h"
 #include "nsITelemetry.h"

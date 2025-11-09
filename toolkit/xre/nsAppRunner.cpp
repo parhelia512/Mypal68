@@ -645,12 +645,12 @@ nsXULAppInfo::GetUniqueProcessID(uint64_t* aResult) {
 }
 
 NS_IMETHODIMP
-nsXULAppInfo::GetRemoteType(nsAString& aRemoteType) {
+nsXULAppInfo::GetRemoteType(nsACString& aRemoteType) {
   if (XRE_IsContentProcess()) {
     ContentChild* cc = ContentChild::GetSingleton();
     aRemoteType.Assign(cc->GetRemoteType());
   } else {
-    SetDOMStringToNull(aRemoteType);
+    aRemoteType = VoidCString();
   }
 
   return NS_OK;
@@ -756,7 +756,7 @@ nsXULAppInfo::EnsureContentProcess() {
   if (!XRE_IsParentProcess()) return NS_ERROR_NOT_AVAILABLE;
 
   RefPtr<ContentParent> unused = ContentParent::GetNewOrUsedBrowserProcess(
-      nullptr, NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE));
+      nullptr, DEFAULT_REMOTE_TYPE);
   return NS_OK;
 }
 
@@ -3516,10 +3516,10 @@ int XREMain::XRE_mainStartup(bool* aExitFlag) {
   BuildVersion(version);
 
 #ifdef TARGET_OS_ABI
-  NS_NAMED_LITERAL_CSTRING(osABI, TARGET_OS_ABI);
+  constexpr auto osABI = nsLiteralCString{TARGET_OS_ABI};
 #else
   // No TARGET_XPCOM_ABI, but at least the OS is known
-  NS_NAMED_LITERAL_CSTRING(osABI, OS_TARGET "_UNKNOWN");
+  constexpr auto osABI = nsLiteralCString{OS_TARGET "_UNKNOWN"};
 #endif
 
   // Check for version compatibility with the last version of the app this
@@ -3666,27 +3666,6 @@ nsresult XREMain::XRE_mainRun() {
   auto dllServicesDisable =
       MakeScopeExit([&dllServices]() { dllServices->DisableFull(); });
 #endif  // defined(XP_WIN)*/
-
-#ifdef NS_FUNCTION_TIMER
-  // initialize some common services, so we don't pay the cost for these at odd
-  // times later on; SetWindowCreator -> ChromeRegistry -> IOService ->
-  // SocketTransportService -> (nspr wspm init), Prefs
-  {
-    nsCOMPtr<nsISupports> comp;
-
-    comp = do_GetService("@mozilla.org/preferences-service;1");
-
-    comp = do_GetService("@mozilla.org/network/socket-transport-service;1");
-
-    comp = do_GetService("@mozilla.org/network/dns-service;1");
-
-    comp = do_GetService("@mozilla.org/network/io-service;1");
-
-    comp = do_GetService("@mozilla.org/chrome/chrome-registry;1");
-
-    comp = do_GetService("@mozilla.org/focus-event-suppressor-service;1");
-  }
-#endif
 
   rv = mScopedXPCOM->SetWindowCreator(mNativeApp);
   NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
@@ -4316,6 +4295,10 @@ nsresult XRE_DeinitCommandLine() {
 
 GeckoProcessType XRE_GetProcessType() {
   return mozilla::startup::sChildProcessType;
+}
+
+const char* XRE_GetProcessTypeString() {
+  return XRE_GeckoProcessTypeToString(XRE_GetProcessType());
 }
 
 bool XRE_IsE10sParentProcess() {

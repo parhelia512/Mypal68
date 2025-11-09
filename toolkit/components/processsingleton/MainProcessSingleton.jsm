@@ -10,17 +10,15 @@ function MainProcessSingleton() {}
 MainProcessSingleton.prototype = {
   classID: Components.ID("{0636a680-45cb-11e4-916c-0800200c9a66}"),
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIObserver,
-    Ci.nsISupportsWeakReference,
+    "nsIObserver",
+    "nsISupportsWeakReference",
   ]),
 
   observe(subject, topic, data) {
     switch (topic) {
       case "app-startup": {
-        ChromeUtils.import(
-          "resource://gre/modules/CustomElementsListener.jsm",
-          null
-        );
+        // Imported for side-effects.
+        ChromeUtils.import("resource://gre/modules/CustomElementsListener.jsm");
 
         // Load this script early so that console.* is initialized
         // before other frame scripts.

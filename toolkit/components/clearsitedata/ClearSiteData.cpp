@@ -219,17 +219,16 @@ uint32_t ClearSiteData::ParseHeader(nsIHttpChannel* aChannel,
   MOZ_ASSERT(aChannel);
 
   nsAutoCString headerValue;
-  nsresult rv = aChannel->GetResponseHeader(
-      NS_LITERAL_CSTRING("Clear-Site-Data"), headerValue);
+  nsresult rv = aChannel->GetResponseHeader("Clear-Site-Data"_ns, headerValue);
   if (NS_FAILED(rv)) {
     return 0;
   }
 
   uint32_t flags = 0;
 
-  nsCCharSeparatedTokenizer token(headerValue, ',');
-  while (token.hasMoreTokens()) {
-    auto value = token.nextToken();
+  for (auto value : nsCCharSeparatedTokenizer(headerValue, ',').ToRange()) {
+    // XXX This seems unnecessary, since the tokenizer already strips whitespace
+    // around tokens.
     value.StripTaggedASCII(mozilla::ASCIIMask::MaskWhitespace());
 
     if (value.EqualsLiteral("\"cache\"")) {

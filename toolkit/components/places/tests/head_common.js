@@ -721,7 +721,7 @@ NavBookmarkObserver.prototype = {
   onItemRemoved() {},
   onItemChanged() {},
   onItemMoved() {},
-  QueryInterface: ChromeUtils.generateQI([Ci.nsINavBookmarkObserver]),
+  QueryInterface: ChromeUtils.generateQI(["nsINavBookmarkObserver"]),
 };
 
 /**
@@ -747,7 +747,7 @@ NavHistoryResultObserver.prototype = {
   nodeTitleChanged() {},
   nodeURIChanged() {},
   sortingChanged() {},
-  QueryInterface: ChromeUtils.generateQI([Ci.nsINavHistoryResultObserver]),
+  QueryInterface: ChromeUtils.generateQI(["nsINavHistoryResultObserver"]),
 };
 
 function checkBookmarkObject(info) {

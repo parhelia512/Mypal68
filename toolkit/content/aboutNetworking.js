@@ -28,6 +28,7 @@ const gRequestNetworkingData = {
   dnslookuptool: () => {},
   logging: () => {},
   rcwn: gDashboard.requestRcwnStats,
+  networkid: displayNetworkID,
 };
 const gDashboardCallbacks = {
   http: displayHttp,
@@ -106,6 +107,7 @@ function displayDns(data) {
 
     row.appendChild(column);
     row.appendChild(col(data.entries[i].expiration));
+    row.appendChild(col(data.entries[i].originAttributesSuffix));
     new_cont.appendChild(row);
   }
 
@@ -177,6 +179,16 @@ function displayRcwnStats(data) {
   }
 }
 
+function displayNetworkID() {
+  let linkIsUp = gNetLinkSvc.isLinkUp;
+  let linkStatusKnown = gNetLinkSvc.linkStatusKnown;
+  let networkID = gNetLinkSvc.networkID;
+
+  document.getElementById("networkid_isUp").innerText = linkIsUp;
+  document.getElementById("networkid_statusKnown").innerText = linkStatusKnown;
+  document.getElementById("networkid_id").innerText = networkID;
+}
+
 function requestAllNetworkingData() {
   for (let id in gRequestNetworkingData) {
     requestNetworkingDataForTab(id);
@@ -194,12 +206,6 @@ function init() {
   }
   gInited = true;
   gDashboard.enableLogging = true;
-  if (Services.prefs.getBoolPref("network.warnOnAboutNetworking")) {
-    let div = document.getElementById("warning_message");
-    div.classList.add("active");
-    div.hidden = false;
-    document.getElementById("confpref").addEventListener("click", confirm);
-  }
 
   requestAllNetworkingData();
 
@@ -412,14 +418,6 @@ function stopLogging() {
   // clear the log file as well
   Services.prefs.clearUserPref("logging.config.LOG_FILE");
   updateLogFile();
-}
-
-function confirm() {
-  let div = document.getElementById("warning_message");
-  div.classList.remove("active");
-  div.hidden = true;
-  let warnBox = document.getElementById("warncheck");
-  Services.prefs.setBoolPref("network.warnOnAboutNetworking", warnBox.checked);
 }
 
 function show(button) {

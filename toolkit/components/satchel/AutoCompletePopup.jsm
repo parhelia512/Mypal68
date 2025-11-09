@@ -15,8 +15,8 @@ const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 var AutoCompleteResultView = {
   // nsISupports
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIAutoCompleteController,
-    Ci.nsIAutoCompleteInput,
+    "nsIAutoCompleteController",
+    "nsIAutoCompleteInput",
   ]),
 
   // Private variables

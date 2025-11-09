@@ -5,6 +5,10 @@
 const DB_VERSION = 6; // The database schema version
 const PERMISSION_SAVE_LOGINS = "login-saving";
 
+const { ComponentUtils } = ChromeUtils.import(
+  "resource://gre/modules/ComponentUtils.jsm"
+);
+
 const { XPCOMUtils } = ChromeUtils.import(
   "resource://gre/modules/XPCOMUtils.jsm"
 );
@@ -54,11 +58,11 @@ function LoginManagerStorage_mozStorage() {}
 LoginManagerStorage_mozStorage.prototype = {
   classID: Components.ID("{8c2023b9-175c-477e-9761-44ae7b549756}"),
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsILoginManagerStorage,
-    Ci.nsIInterfaceRequestor,
+    "nsILoginManagerStorage",
+    "nsIInterfaceRequestor",
   ]),
 
-  _xpcom_factory: XPCOMUtils.generateSingletonFactory(
+  _xpcom_factory: ComponentUtils.generateSingletonFactory(
     this.LoginManagerStorage_mozStorage
   ),
 

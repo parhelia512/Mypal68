@@ -117,7 +117,7 @@ bool ExtensionPolicyService::IsExtensionProcess() const {
 
   if (isRemote && XRE_IsContentProcess()) {
     auto& remoteType = dom::ContentChild::GetSingleton()->GetRemoteType();
-    return remoteType.EqualsLiteral(EXTENSION_REMOTE_TYPE);
+    return remoteType == EXTENSION_REMOTE_TYPE;
   }
   return !isRemote && XRE_IsParentProcess();
 }
@@ -145,8 +145,9 @@ bool ExtensionPolicyService::RegisterExtension(WebExtensionPolicy& aPolicy) {
     return false;
   }
 
-  mExtensions.Put(aPolicy.Id(), RefPtr{&aPolicy});
-  mExtensionHosts.Put(aPolicy.MozExtensionHostname(), RefPtr{&aPolicy});
+  mExtensions.InsertOrUpdate(aPolicy.Id(), RefPtr{&aPolicy});
+  mExtensionHosts.InsertOrUpdate(aPolicy.MozExtensionHostname(),
+                                 RefPtr{&aPolicy});
   return true;
 }
 
@@ -165,21 +166,16 @@ bool ExtensionPolicyService::UnregisterExtension(WebExtensionPolicy& aPolicy) {
 }
 
 bool ExtensionPolicyService::RegisterObserver(DocumentObserver& aObserver) {
-  if (mObservers.GetWeak(&aObserver)) {
-    return false;
-  }
-
-  mObservers.Put(&aObserver, RefPtr{&aObserver});
-  return true;
+  bool inserted = false;
+  mObservers.LookupOrInsertWith(&aObserver, [&] {
+    inserted = true;
+    return RefPtr{&aObserver};
+  });
+  return inserted;
 }
 
 bool ExtensionPolicyService::UnregisterObserver(DocumentObserver& aObserver) {
-  if (!mObservers.GetWeak(&aObserver)) {
-    return false;
-  }
-
-  mObservers.Remove(&aObserver);
-  return true;
+  return mObservers.Remove(&aObserver);
 }
 
 /*****************************************************************************
@@ -199,7 +195,7 @@ ExtensionPolicyService::CollectReports(nsIHandleReportCallback* aHandleReport,
     name.ReplaceSubstring("\\", "");
 
     nsString url;
-    MOZ_TRY_VAR(url, ext->GetURL(NS_LITERAL_STRING("")));
+    MOZ_TRY_VAR(url, ext->GetURL(u""_ns));
 
     nsPrintfCString desc("Extension(id=%s, name=\"%s\", baseURL=%s)", id.get(),
                          name.get(), NS_ConvertUTF16toUTF8(url).get());
@@ -208,10 +204,9 @@ ExtensionPolicyService::CollectReports(nsIHandleReportCallback* aHandleReport,
     nsCString path("extensions/");
     path.Append(desc);
 
-    aHandleReport->Callback(
-        EmptyCString(), path, KIND_NONHEAP, UNITS_COUNT, 1,
-        NS_LITERAL_CSTRING("WebExtensions that are active in this session"),
-        aData);
+    aHandleReport->Callback(EmptyCString(), path, KIND_NONHEAP, UNITS_COUNT, 1,
+                            "WebExtensions that are active in this session"_ns,
+                            aData);
   }
 
   return NS_OK;
@@ -260,9 +255,9 @@ nsresult ExtensionPolicyService::Observe(nsISupports* aSubject,
     RefPtr<ContentFrameMessageManager> mm = do_QueryObject(aSubject);
     NS_ENSURE_TRUE(mm, NS_ERROR_UNEXPECTED);
 
-    mMessageManagers.PutEntry(mm);
+    mMessageManagers.Insert(mm);
 
-    mm->AddSystemEventListener(NS_LITERAL_STRING("unload"), this, false, false);
+    mm->AddSystemEventListener(u"unload"_ns, this, false, false);
   } else if (!strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
     const nsCString converted = NS_ConvertUTF16toUTF8(aData);
     const char* pref = converted.get();
@@ -279,7 +274,7 @@ nsresult ExtensionPolicyService::HandleEvent(dom::Event* aEvent) {
   RefPtr<ContentFrameMessageManager> mm = do_QueryObject(aEvent->GetTarget());
   MOZ_ASSERT(mm);
   if (mm) {
-    mMessageManagers.RemoveEntry(mm);
+    mMessageManagers.Remove(mm);
   }
   return NS_OK;
 }
@@ -329,9 +324,7 @@ nsresult ExtensionPolicyService::InjectContentScripts(
   AutoJSAPI jsapi;
   MOZ_ALWAYS_TRUE(jsapi.Init(xpc::PrivilegedJunkScope()));
 
-  for (auto iter = mMessageManagers.ConstIter(); !iter.Done(); iter.Next()) {
-    ContentFrameMessageManager* mm = iter.Get()->GetKey();
-
+  for (ContentFrameMessageManager* mm : mMessageManagers) {
     nsCOMPtr<nsIDocShell> docShell = mm->GetDocShell(IgnoreErrors());
     NS_ENSURE_TRUE(docShell, NS_ERROR_UNEXPECTED);
 
@@ -365,7 +358,7 @@ nsresult ExtensionPolicyService::InjectContentScripts(
           MOZ_TRY(ExecuteContentScripts(jsapi.cx(), inner,
                                         GetScripts(RunAt::Document_start))
                       ->ThenWithCycleCollectedArgs(
-                          [](JSContext* aCx, JS::HandleValue aValue,
+                          [](JSContext* aCx, JS::HandleValue aValue, ErrorResult& aRv,
                              ExtensionPolicyService* aSelf,
                              nsPIDOMWindowInner* aInner, Scripts&& aScripts) {
                             return aSelf
@@ -376,7 +369,7 @@ nsresult ExtensionPolicyService::InjectContentScripts(
                       .andThen([&](auto aPromise) {
                         return aPromise->ThenWithCycleCollectedArgs(
                             [](JSContext* aCx, JS::HandleValue aValue,
-                               ExtensionPolicyService* aSelf,
+                               ErrorResult& aRv, ExtensionPolicyService* aSelf,
                                nsPIDOMWindowInner* aInner, Scripts&& aScripts) {
                               return aSelf
                                   ->ExecuteContentScripts(aCx, aInner, aScripts)

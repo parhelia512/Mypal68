@@ -263,9 +263,9 @@ const backgroundPageThumbsContent = {
   },
 
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIWebProgressListener,
-    Ci.nsISupportsWeakReference,
-    Ci.nsIObserver,
+    "nsIWebProgressListener",
+    "nsISupportsWeakReference",
+    "nsIObserver",
   ]),
 };
 

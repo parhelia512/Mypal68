@@ -33,8 +33,10 @@ using base::CountHistogram;
 using base::FlagHistogram;
 using base::LinearHistogram;
 using mozilla::MakeTuple;
+using mozilla::MakeUnique;
 using mozilla::StaticMutex;
 using mozilla::StaticMutexAutoLock;
+using mozilla::UniquePtr;
 using mozilla::Telemetry::HistogramAccumulation;
 using mozilla::Telemetry::HistogramCount;
 using mozilla::Telemetry::HistogramID;
@@ -168,7 +170,7 @@ typedef mozilla::Vector<HistogramSnapshotInfo> HistogramSnapshotsArray;
 typedef mozilla::Vector<HistogramSnapshotsArray> HistogramProcessSnapshotsArray;
 
 // The following is used to handle snapshot information for keyed histograms.
-typedef nsDataHashtable<nsCStringHashKey, HistogramSnapshotData>
+typedef nsTHashMap<nsCStringHashKey, HistogramSnapshotData>
     KeyedHistogramSnapshotData;
 
 struct KeyedHistogramSnapshotInfo {
@@ -968,7 +970,6 @@ Histogram::Histogram(HistogramID histogramId, const HistogramInfo& info,
     return;
   }
 
-  base::Histogram* h;
   const int bucketsOffset = gHistogramBucketLowerBoundIndex[histogramId];
 
   if (info.is_single_store()) {
@@ -977,8 +978,9 @@ Histogram::Histogram(HistogramID histogramId, const HistogramInfo& info,
     for (uint32_t i = 0; i < info.store_count; i++) {
       auto store = nsDependentCString(
           &gHistogramStringTable[gHistogramStoresTable[info.store_index + i]]);
-      h = internal_CreateBaseHistogramInstance(info, bucketsOffset);
-      mStorage.Put(store, h);
+      mStorage.InsertOrUpdate(store, UniquePtr<base::Histogram>(
+                                         internal_CreateBaseHistogramInstance(
+                                             info, bucketsOffset)));
     }
   }
 }
@@ -1080,8 +1082,8 @@ namespace {
 nsresult internal_ReflectKeyedHistogram(
     const KeyedHistogramSnapshotData& aSnapshot, const HistogramInfo& info,
     JSContext* aCx, JS::Handle<JSObject*> aObj) {
-  for (auto iter = aSnapshot.ConstIter(); !iter.Done(); iter.Next()) {
-    HistogramSnapshotData& keyData = iter.Data();
+  for (const auto& entry : aSnapshot) {
+    const HistogramSnapshotData& keyData = entry.GetData();
 
     JS::RootedObject histogramSnapshot(aCx, JS_NewPlainObject(aCx));
     if (!histogramSnapshot) {
@@ -1093,7 +1095,7 @@ nsresult internal_ReflectKeyedHistogram(
       return NS_ERROR_FAILURE;
     }
 
-    const NS_ConvertUTF8toUTF16 key(iter.Key());
+    const NS_ConvertUTF8toUTF16 key(entry.GetKey());
     if (!JS_DefineUCProperty(aCx, aObj, key.Data(), key.Length(),
                              histogramSnapshot, JSPROP_ENUMERATE)) {
       return NS_ERROR_FAILURE;
@@ -1120,7 +1122,7 @@ KeyedHistogram::KeyedHistogram(HistogramID id, const HistogramInfo& info,
     for (uint32_t i = 0; i < info.store_count; i++) {
       auto store = nsDependentCString(
           &gHistogramStringTable[gHistogramStoresTable[info.store_index + i]]);
-      mStorage.Put(store, new KeyedHistogramMapType);
+      mStorage.InsertOrUpdate(store, MakeUnique<KeyedHistogramMapType>());
     }
   }
 }
@@ -1154,16 +1156,17 @@ nsresult KeyedHistogram::GetHistogram(const nsCString& aStore,
   }
 
   int bucketsOffset = gHistogramBucketLowerBoundIndex[mId];
-  base::Histogram* h =
-      internal_CreateBaseHistogramInstance(mHistogramInfo, bucketsOffset);
+  auto h = UniquePtr<base::Histogram>{
+      internal_CreateBaseHistogramInstance(mHistogramInfo, bucketsOffset)};
   if (!h) {
     return NS_ERROR_FAILURE;
   }
 
   h->ClearFlags(base::Histogram::kUmaTargetedHistogramFlag);
-  *histogram = h;
+  *histogram = h.get();
 
-  bool inserted = histogramMap->Put(key, h, mozilla::fallible);
+  bool inserted =
+      histogramMap->InsertOrUpdate(key, std::move(h), mozilla::fallible);
   if (MOZ_UNLIKELY(!inserted)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -1386,8 +1389,8 @@ nsresult KeyedHistogram::GetSnapshot(const StaticMutexAutoLock& aLock,
   }
 
   // Snapshot every key.
-  for (auto iter = histogramMap->ConstIter(); !iter.Done(); iter.Next()) {
-    base::Histogram* keyData = iter.UserData();
+  for (const auto& entry : *histogramMap) {
+    base::Histogram* keyData = entry.GetWeak();
     if (!keyData) {
       return NS_ERROR_FAILURE;
     }
@@ -1399,7 +1402,7 @@ nsresult KeyedHistogram::GetSnapshot(const StaticMutexAutoLock& aLock,
     }
 
     // Append to the final snapshot.
-    aSnapshot.Put(iter.Key(), std::move(keySnapshot));
+    aSnapshot.InsertOrUpdate(entry.GetKey(), std::move(keySnapshot));
   }
 
   if (aClearSubsession) {
@@ -1632,7 +1635,7 @@ static constexpr uint32_t HistogramObjectDataSlot = 0;
 static constexpr uint32_t HistogramObjectSlotCount =
     HistogramObjectDataSlot + 1;
 
-void internal_JSHistogram_finalize(JSFreeOp*, JSObject*);
+void internal_JSHistogram_finalize(JS::GCContext*, JSObject*);
 
 static const JSClassOps sJSHistogramClassOps = {nullptr, /* addProperty */
                                                 nullptr, /* delProperty */
@@ -2026,7 +2029,7 @@ nsresult internal_WrapAndReturnHistogram(HistogramID id, JSContext* cx,
   return NS_OK;
 }
 
-void internal_JSHistogram_finalize(JSFreeOp*, JSObject* obj) {
+void internal_JSHistogram_finalize(JS::GCContext* gcx, JSObject* obj) {
   if (!obj || JS::GetClass(obj) != &sJSHistogramClass) {
     MOZ_ASSERT_UNREACHABLE("Should have the right JS class.");
     return;
@@ -2058,7 +2061,7 @@ void internal_JSHistogram_finalize(JSFreeOp*, JSObject* obj) {
 
 namespace {
 
-void internal_JSKeyedHistogram_finalize(JSFreeOp*, JSObject*);
+void internal_JSKeyedHistogram_finalize(JS::GCContext*, JSObject*);
 
 static const JSClassOps sJSKeyedHistogramClassOps = {
     nullptr, /* addProperty */
@@ -2379,7 +2382,7 @@ nsresult internal_WrapAndReturnKeyedHistogram(
   return NS_OK;
 }
 
-void internal_JSKeyedHistogram_finalize(JSFreeOp*, JSObject* obj) {
+void internal_JSKeyedHistogram_finalize(JS::GCContext* gcx, JSObject* obj) {
   if (!obj || JS::GetClass(obj) != &sJSKeyedHistogramClass) {
     MOZ_ASSERT_UNREACHABLE("Should have the right JS class.");
     return;
@@ -3242,9 +3245,9 @@ nsresult TelemetryHistogram::SerializeKeyedHistograms(
       aWriter.StartObjectProperty(mozilla::MakeStringSpan(info.name()));
 
       // Each key is a new object with a "sum" and a "counts" property.
-      for (auto iter = hData.data.ConstIter(); !iter.Done(); iter.Next()) {
-        HistogramSnapshotData& keyData = iter.Data();
-        aWriter.StartObjectProperty(PromiseFlatCString(iter.Key()));
+      for (const auto& entry : hData.data) {
+        const HistogramSnapshotData& keyData = entry.GetData();
+        aWriter.StartObjectProperty(PromiseFlatCString(entry.GetKey()));
         internal_ReflectHistogramToJSON(keyData, aWriter);
         aWriter.EndObject();
       }
@@ -3401,7 +3404,7 @@ nsresult TelemetryHistogram::DeserializeHistograms(JSContext* aCx,
         }
 
         base::Histogram* h = nullptr;
-        NS_NAMED_LITERAL_CSTRING(store, "main");
+        constexpr auto store = "main"_ns;
         if (!w->GetHistogram(store, &h)) {
           continue;
         }

@@ -18,9 +18,9 @@ function registerConverter() {
     classID: Components.ID("{5f01d6ef-c090-45a4-b3e5-940d64713eb7}"),
     contractID: "@mozilla.org/streamconv;1?from=test/content&to=*/*",
     QueryInterface: ChromeUtils.generateQI([
-      Ci.nsIRequestObserver,
-      Ci.nsIStreamListener,
-      Ci.nsIStreamConverter,
+      "nsIRequestObserver",
+      "nsIStreamListener",
+      "nsIStreamConverter",
     ]),
 
     // nsIStreamConverter

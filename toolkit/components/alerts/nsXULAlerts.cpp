@@ -359,7 +359,7 @@ nsXULAlerts::ShowAlertWithIconURI(nsIAlertNotification* aAlert,
                           argsArray, getter_AddRefs(newWindow));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  mNamedWindows.Put(name, newWindow);
+  mNamedWindows.InsertOrUpdate(name, newWindow);
   alertObserver->SetAlertWindow(newWindow);
 
   return NS_OK;
@@ -378,11 +378,11 @@ nsXULAlerts::GetManualDoNotDisturb(bool* aRetVal) {
 }
 
 NS_IMETHODIMP
-nsXULAlerts::CloseAlert(const nsAString& aAlertName, nsIPrincipal* aPrincipal) {
+nsXULAlerts::CloseAlert(const nsAString& aAlertName) {
   mozIDOMWindowProxy* alert = mNamedWindows.GetWeak(aAlertName);
   if (nsCOMPtr<nsPIDOMWindowOuter> domWindow =
           nsPIDOMWindowOuter::From(alert)) {
-    domWindow->DispatchCustomEvent(NS_LITERAL_STRING("XULAlertClose"),
+    domWindow->DispatchCustomEvent(u"XULAlertClose"_ns,
                                    ChromeOnlyDispatch::eYes);
   }
   return NS_OK;

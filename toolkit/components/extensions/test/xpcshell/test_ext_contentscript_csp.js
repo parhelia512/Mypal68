@@ -87,6 +87,32 @@ function testFetch(data) {
     });
 }
 
+async function testHttpRequestUpgraded(data = {}) {
+  let f = data.content ? content.fetch : fetch;
+  return f(data.url)
+    .then(() => "http:")
+    .catch(() => "https:");
+}
+
+async function testWebSocketUpgraded(data = {}) {
+  let ws = data.content ? content.WebSocket : WebSocket;
+  new ws(data.url);
+}
+
+function webSocketUpgradeListenerBackground() {
+  // Catch websocket requests and send the protocol back to be asserted.
+  browser.webRequest.onBeforeRequest.addListener(
+    details => {
+      // Send the protocol back as test result.
+      // This will either be "wss:", "ws:"
+      browser.test.sendMessage("result", new URL(details.url).protocol);
+      return { cancel: true };
+    },
+    { urls: ["wss://example.com/*", "ws://example.com/*"] },
+    ["blocking"]
+  );
+}
+
 // If the violation source is the extension the securitypolicyviolation event is not fired.
 // If the page is the source, the event is fired and both the content script or page scripts
 // will receive the event.  If we're expecting a moz-extension report  we'll  fail in the

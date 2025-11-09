@@ -12,7 +12,7 @@
 #include "mozilla/extensions/WebExtensionPolicy.h"
 
 #include "nsHashKeys.h"
-#include "nsDataHashtable.h"
+#include "nsTHashMap.h"
 
 class nsAtom;
 class nsIRemoteTab;
@@ -62,11 +62,11 @@ class WebRequestService final {
       dom::ContentParent* aContentParent);
 
  private:
-  ~WebRequestService();
+  ~WebRequestService() = default;
 
   friend ChannelEntry;
 
-  nsDataHashtable<nsUint64HashKey, ChannelEntry*> mChannelEntries;
+  nsTHashMap<nsUint64HashKey, ChannelEntry*> mChannelEntries;
 };
 
 }  // namespace extensions

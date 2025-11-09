@@ -6,7 +6,7 @@
 #define nsSystemAlertsService_h__
 
 #include "nsIAlertsService.h"
-#include "nsDataHashtable.h"
+#include "nsTHashMap.h"
 #include "nsCOMPtr.h"
 
 class nsAlertsIconListener;
@@ -31,7 +31,7 @@ class nsSystemAlertsService : public nsIAlertsService {
   void AddListener(const nsAString& aAlertName,
                    nsAlertsIconListener* aListener);
 
-  nsDataHashtable<nsStringHashKey, nsAlertsIconListener*> mActiveListeners;
+  nsTHashMap<nsStringHashKey, nsAlertsIconListener*> mActiveListeners;
 };
 
 #endif /* nsSystemAlertsService_h__ */

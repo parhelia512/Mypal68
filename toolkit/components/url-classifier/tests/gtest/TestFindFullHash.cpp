@@ -215,7 +215,7 @@ void ToBase64EncodedStringArray(nsCString (&aArray)[N],
     nsCString encoded;
     nsresult rv = Base64Encode(aArray[i], encoded);
     NS_ENSURE_SUCCESS_VOID(rv);
-    aEncodedArray.AppendElement(encoded);
+    aEncodedArray.AppendElement(std::move(encoded));
   }
 }
 

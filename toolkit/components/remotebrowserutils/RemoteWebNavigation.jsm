@@ -33,7 +33,7 @@ RemoteWebNavigation.prototype = {
   classID: Components.ID("{4b56964e-cdf3-4bb8-830c-0e2dad3f4ebd}"),
   contractID: "@mozilla.org/remote-web-navigation;1",
 
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIWebNavigation]),
+  QueryInterface: ChromeUtils.generateQI(["nsIWebNavigation"]),
 
   swapBrowser(aBrowser) {
     this._browser = aBrowser;

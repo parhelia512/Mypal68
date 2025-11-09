@@ -1844,9 +1844,8 @@ FinderHighlighter.prototype = {
     }
   },
 
-  WillDeleteSelection(selection) {
-    let editor = this._getEditableNode(selection.getRangeAt(0).startContainer)
-      .editor;
+  WillDeleteRanges(rangesToDelete) {
+    let { editor } = this._getEditableNode(rangesToDelete[0].startContainer);
     let controller = editor.selectionController;
     let fSelection = controller.getSelection(
       Ci.nsISelectionController.SELECTION_FIND
@@ -1856,7 +1855,7 @@ FinderHighlighter.prototype = {
     let numberOfDeletedSelections = 0;
     let numberOfMatches = fSelection.rangeCount;
 
-    // We need to test if any ranges in the deleted selection (selection)
+    // We need to test if any ranges to be deleted
     // are in any of the ranges of the find selection
     // Usually both selections will only contain one range, however
     // either may contain more than one.
@@ -1865,12 +1864,11 @@ FinderHighlighter.prototype = {
       shouldDelete[fIndex] = false;
       let fRange = fSelection.getRangeAt(fIndex);
 
-      for (let index = 0; index < selection.rangeCount; index++) {
+      for (let selRange of rangesToDelete) {
         if (shouldDelete[fIndex]) {
           continue;
         }
 
-        let selRange = selection.getRangeAt(index);
         let doesOverlap = this._checkOverlap(selRange, fRange);
         if (doesOverlap) {
           shouldDelete[fIndex] = true;

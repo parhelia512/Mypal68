@@ -49,7 +49,7 @@ CallbackCaller.prototype = {
 };
 
 var ContentPrefServiceChild = {
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIContentPrefService2]),
+  QueryInterface: ChromeUtils.generateQI(["nsIContentPrefService2"]),
 
   // Map from pref name -> set of observers
   _observers: new Map(),

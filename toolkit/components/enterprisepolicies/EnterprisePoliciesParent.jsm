@@ -80,9 +80,9 @@ function EnterprisePoliciesManager() {
 
 EnterprisePoliciesManager.prototype = {
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIObserver,
-    Ci.nsISupportsWeakReference,
-    Ci.nsIEnterprisePolicies,
+    "nsIObserver",
+    "nsISupportsWeakReference",
+    "nsIEnterprisePolicies",
   ]),
 
   _initialize() {

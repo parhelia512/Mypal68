@@ -22,7 +22,7 @@ ChromeUtils.defineModuleGetter(
 function TelemetryStartup() {}
 
 TelemetryStartup.prototype.QueryInterface = ChromeUtils.generateQI([
-  Ci.nsIObserver,
+  "nsIObserver",
 ]);
 TelemetryStartup.prototype.observe = function(aSubject, aTopic, aData) {
   if (aTopic == "profile-after-change") {

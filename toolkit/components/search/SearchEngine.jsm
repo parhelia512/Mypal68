@@ -133,11 +133,11 @@ loadListener.prototype = {
   _stream: null,
 
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIRequestObserver,
-    Ci.nsIStreamListener,
-    Ci.nsIChannelEventSink,
-    Ci.nsIInterfaceRequestor,
-    Ci.nsIProgressEventSink,
+    "nsIRequestObserver",
+    "nsIStreamListener",
+    "nsIChannelEventSink",
+    "nsIInterfaceRequestor",
+    "nsIProgressEventSink",
   ]),
 
   // nsIRequestObserver
@@ -2142,7 +2142,7 @@ SearchEngine.prototype = {
   },
 
   // nsISupports
-  QueryInterface: ChromeUtils.generateQI([Ci.nsISearchEngine]),
+  QueryInterface: ChromeUtils.generateQI(["nsISearchEngine"]),
 
   get wrappedJSObject() {
     return this;
@@ -2277,7 +2277,7 @@ Submission.prototype = {
   get postData() {
     return this._postData;
   },
-  QueryInterface: ChromeUtils.generateQI([Ci.nsISearchSubmission]),
+  QueryInterface: ChromeUtils.generateQI(["nsISearchSubmission"]),
 };
 
 var EXPORTED_SYMBOLS = ["SearchEngine", "getVerificationHash"];

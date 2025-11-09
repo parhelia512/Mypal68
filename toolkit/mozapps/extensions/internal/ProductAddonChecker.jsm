@@ -489,4 +489,7 @@ const ProductAddonChecker = {
       throw e;
     }
   },
+
+  // For test use only.
+  computeHash,
 };

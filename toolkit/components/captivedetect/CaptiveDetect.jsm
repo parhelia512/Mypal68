@@ -129,8 +129,8 @@ function LoginObserver(captivePortalDetector) {
   // Public interface of LoginObserver
   let observer = {
     QueryInterface: ChromeUtils.generateQI([
-      Ci.nsIHttpActivityObserver,
-      Ci.nsITimerCallback,
+      "nsIHttpActivityObserver",
+      "nsITimerCallback",
     ]),
 
     attach: function attach() {
@@ -263,7 +263,7 @@ function CaptivePortalDetector() {
 
 CaptivePortalDetector.prototype = {
   classID: kCAPTIVEPORTALDETECTOR_CID,
-  QueryInterface: ChromeUtils.generateQI([Ci.nsICaptivePortalDetector]),
+  QueryInterface: ChromeUtils.generateQI(["nsICaptivePortalDetector"]),
 
   // nsICaptivePortalDetector
   checkCaptivePortal: function checkCaptivePortal(aInterfaceName, aCallback) {

@@ -17,7 +17,6 @@
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/SystemGroup.h"
-#include "mozilla/Telemetry.h"
 #include "mozilla/ThreadLocal.h"
 #include "mozilla/Unused.h"
 #include "nsIObserver.h"
@@ -471,11 +470,10 @@ void BackgroundHangThread::ReportHang(TimeDuration aHangTime) {
   // Recovered from a hang; called on the monitor thread
   // mManager->mLock IS locked
 
-  HangDetails hangDetails(
-      aHangTime,
-      nsDependentCString(XRE_GeckoProcessTypeToString(XRE_GetProcessType())),
-      VoidString(), mThreadName, mRunnableName, std::move(mHangStack),
-      std::move(mAnnotations));
+  HangDetails hangDetails(aHangTime,
+                          nsDependentCString(XRE_GetProcessTypeString()),
+                          VoidCString(), mThreadName, mRunnableName,
+                          std::move(mHangStack), std::move(mAnnotations));
 
   // If the hang processing thread exists, we can process the native stack
   // on it. Otherwise, we are unable to report a native stack, so we just
@@ -585,12 +583,8 @@ bool BackgroundHangMonitor::IsDisabled() {
 
 bool BackgroundHangMonitor::DisableOnBeta() {
   nsAutoCString clientID;
-  nsresult rv =
-      Preferences::GetCString("toolkit.telemetry.cachedClientID", clientID);
-  bool telemetryEnabled = Telemetry::CanRecordPrereleaseData();
 
-  if (!telemetryEnabled || NS_FAILED(rv) ||
-      BackgroundHangMonitor::ShouldDisableOnBeta(clientID)) {
+  if (BackgroundHangMonitor::ShouldDisableOnBeta(clientID)) {
     if (XRE_IsParentProcess()) {
       BackgroundHangMonitor::Shutdown();
     } else {
@@ -711,10 +705,6 @@ void BackgroundHangMonitor::NotifyActivity() {
                "This thread is not initialized for hang monitoring");
     return;
   }
-
-  if (Telemetry::CanRecordExtended()) {
-    mThread->NotifyActivity();
-  }
 #endif
 }
 
@@ -724,10 +714,6 @@ void BackgroundHangMonitor::NotifyWait() {
     MOZ_ASSERT(BackgroundHangManager::sDisabled,
                "This thread is not initialized for hang monitoring");
     return;
-  }
-
-  if (Telemetry::CanRecordExtended()) {
-    mThread->NotifyWait();
   }
 #endif
 }

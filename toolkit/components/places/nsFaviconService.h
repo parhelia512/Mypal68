@@ -14,7 +14,6 @@
 #include "mozilla/storage.h"
 #include "nsCOMPtr.h"
 #include "nsComponentManagerUtils.h"
-#include "nsDataHashtable.h"
 #include "nsIFaviconService.h"
 #include "nsINamed.h"
 #include "nsITimer.h"

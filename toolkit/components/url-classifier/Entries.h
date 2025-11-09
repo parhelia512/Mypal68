@@ -16,7 +16,7 @@
 #include "nsIOutputStream.h"
 #include "nsClassHashtable.h"
 #include "nsComponentManagerUtils.h"
-#include "nsDataHashtable.h"
+#include "nsTHashMap.h"
 #include "plbase64.h"
 
 namespace mozilla {
@@ -311,11 +311,11 @@ nsresult WriteTArray(nsIOutputStream* aStream,
 
 typedef nsClassHashtable<nsUint32HashKey, nsCString> PrefixStringMap;
 
-typedef nsDataHashtable<nsCStringHashKey, int64_t> TableFreshnessMap;
+typedef nsTHashMap<nsCStringHashKey, int64_t> TableFreshnessMap;
 
 typedef nsCStringHashKey FullHashString;
 
-typedef nsDataHashtable<FullHashString, int64_t> FullHashExpiryCache;
+typedef nsTHashMap<FullHashString, int64_t> FullHashExpiryCache;
 
 struct CachedFullHashResponse {
   int64_t negativeCacheExpirySec;
@@ -327,10 +327,7 @@ struct CachedFullHashResponse {
   CachedFullHashResponse& operator=(const CachedFullHashResponse& aOther) {
     negativeCacheExpirySec = aOther.negativeCacheExpirySec;
 
-    fullHashes.Clear();
-    for (auto iter = aOther.fullHashes.ConstIter(); !iter.Done(); iter.Next()) {
-      fullHashes.Put(iter.Key(), iter.Data());
-    }
+    fullHashes = aOther.fullHashes.Clone();
 
     return *this;
   }
@@ -340,8 +337,8 @@ struct CachedFullHashResponse {
         fullHashes.Count() != aOther.fullHashes.Count()) {
       return false;
     }
-    for (auto iter = fullHashes.ConstIter(); !iter.Done(); iter.Next()) {
-      if (iter.Data() != aOther.fullHashes.Get(iter.Key())) {
+    for (const auto& entry : fullHashes) {
+      if (entry.GetData() != aOther.fullHashes.Get(entry.GetKey())) {
         return false;
       }
     }
@@ -354,9 +351,9 @@ typedef nsClassHashtable<nsUint32HashKey, CachedFullHashResponse>
 
 template <class T>
 void CopyClassHashTable(const T& aSource, T& aDestination) {
-  for (auto iter = aSource.ConstIter(); !iter.Done(); iter.Next()) {
-    auto value = aDestination.LookupOrAdd(iter.Key());
-    *value = *(iter.Data());
+  for (const auto& entry : aSource) {
+    auto value = aDestination.GetOrInsertNew(entry.GetKey());
+    *value = *(entry.GetData());
   }
 }
 

@@ -157,8 +157,8 @@ function FormAutoComplete() {
 FormAutoComplete.prototype = {
   classID: Components.ID("{c11c21b2-71c9-4f87-a0f8-5e13f50495fd}"),
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIFormAutoComplete,
-    Ci.nsISupportsWeakReference,
+    "nsIFormAutoComplete",
+    "nsISupportsWeakReference",
   ]),
 
   _prefBranch: null,
@@ -199,8 +199,8 @@ FormAutoComplete.prototype = {
     _self: null,
 
     QueryInterface: ChromeUtils.generateQI([
-      Ci.nsIObserver,
-      Ci.nsISupportsWeakReference,
+      "nsIObserver",
+      "nsISupportsWeakReference",
     ]),
 
     observe(subject, topic, data) {
@@ -598,8 +598,8 @@ function FormAutoCompleteResult(
 
 FormAutoCompleteResult.prototype = {
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIAutoCompleteResult,
-    Ci.nsISupportsWeakReference,
+    "nsIAutoCompleteResult",
+    "nsISupportsWeakReference",
   ]),
 
   // private

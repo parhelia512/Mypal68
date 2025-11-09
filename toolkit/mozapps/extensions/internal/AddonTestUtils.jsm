@@ -560,7 +560,7 @@ var AddonTestUtils = {
           null
         ),
 
-        applyFilter(service, channel, defaultProxyInfo, callback) {
+        applyFilter(channel, defaultProxyInfo, callback) {
           if (hosts.has(channel.URI.host)) {
             callback.onProxyFilterResult(this.proxyInfo);
           } else {
@@ -1325,7 +1325,7 @@ var AddonTestUtils = {
         return null;
       },
 
-      QueryInterface: ChromeUtils.generateQI([Ci.nsIDirectoryServiceProvider]),
+      QueryInterface: ChromeUtils.generateQI(["nsIDirectoryServiceProvider"]),
     };
     Services.dirsvc.registerProvider(dirProvider);
 

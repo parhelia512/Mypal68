@@ -12,7 +12,7 @@ function RemoteSecurityUI() {
 }
 
 RemoteSecurityUI.prototype = {
-  QueryInterface: ChromeUtils.generateQI([Ci.nsISecureBrowserUI]),
+  QueryInterface: ChromeUtils.generateQI(["nsISecureBrowserUI"]),
 
   // nsISecureBrowserUI
   get state() {

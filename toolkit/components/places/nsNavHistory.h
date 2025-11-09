@@ -233,7 +233,7 @@ class nsNavHistory final : public nsSupportsWeakReference,
   void DomainNameFromURI(nsIURI* aURI, nsACString& aDomainName);
   static PRTime NormalizeTime(uint32_t aRelative, PRTime aOffset);
 
-  typedef nsDataHashtable<nsCStringHashKey, nsCString> StringHash;
+  typedef nsTHashMap<nsCStringHashKey, nsCString> StringHash;
 
   enum RecentEventFlags {
     RECENT_TYPED = 1 << 0,      // User typed in URL recently
@@ -432,7 +432,7 @@ class nsNavHistory final : public nsSupportsWeakReference,
   mozilla::UniquePtr<const mozilla::intl::Collator> mCollator;
 
   // recent events
-  typedef nsDataHashtable<nsCStringHashKey, int64_t> RecentEventHash;
+  typedef nsTHashMap<nsCStringHashKey, int64_t> RecentEventHash;
   RecentEventHash mRecentTyped;
   RecentEventHash mRecentLink;
   RecentEventHash mRecentBookmark;

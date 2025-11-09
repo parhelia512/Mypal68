@@ -15,6 +15,7 @@
 #include "mozilla/extensions/StreamFilterParent.h"
 #include "mozilla/dom/AutoEntryScript.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/ipc/Endpoint.h"
 #include "mozilla/dom/RootedDictionary.h" //MY
 #include "nsContentUtils.h"
 #include "nsCycleCollectionParticipant.h"

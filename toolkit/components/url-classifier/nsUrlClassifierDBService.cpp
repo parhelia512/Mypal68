@@ -75,9 +75,6 @@ nsresult TablesToResponse(const nsACString& tables) {
   if (FindInReadable(NS_LITERAL_CSTRING("-harmful-"), tables)) {
     return NS_ERROR_HARMFUL_URI;
   }
-  if (FindInReadable(NS_LITERAL_CSTRING("-phish-"), tables)) {
-    return NS_ERROR_PHISHING_URI;
-  }
   if (FindInReadable(NS_LITERAL_CSTRING("-unwanted-"), tables)) {
     return NS_ERROR_UNWANTED_URI;
   }
@@ -1063,11 +1060,11 @@ nsresult nsUrlClassifierDBServiceWorker::CacheResultToTableUpdate(
 
     if (LOG_ENABLED()) {
       const FullHashExpiryCache& fullHashes = result->response.fullHashes;
-      for (auto iter = fullHashes.ConstIter(); !iter.Done(); iter.Next()) {
+      for (const auto& entry : fullHashes) {
         Completion completion;
-        completion.Assign(iter.Key());
+        completion.Assign(entry.GetKey());
         LOG(("CacheCompletion(v4) hash %X, CacheExpireTime %" PRId64,
-             completion.ToUint32(), iter.Data()));
+             completion.ToUint32(), entry.GetData()));
       }
     }
 
@@ -1350,7 +1347,7 @@ nsUrlClassifierLookupCallback::CompletionV4(const nsACString& aPartialHash,
     uint32_t duration;
     match->GetCacheDuration(&duration);
 
-    result->response.fullHashes.Put(fullHash, nowSec + duration);
+    result->response.fullHashes.InsertOrUpdate(fullHash, nowSec + duration);
   }
 
   return ProcessComplete(result);
@@ -1709,106 +1706,7 @@ NS_IMETHODIMP
 nsUrlClassifierDBService::Classify(nsIPrincipal* aPrincipal,
                                    nsISerialEventTarget* aEventTarget,
                                    nsIURIClassifierCallback* c, bool* aResult) {
-  NS_ENSURE_ARG(aPrincipal);
-  NS_ENSURE_ARG(aResult);
-
-  if (aPrincipal->IsSystemPrincipal()) {
-    *aResult = false;
-    return NS_OK;
-  }
-
-  if (XRE_IsContentProcess()) {
-    using namespace mozilla::dom;
-
-    ContentChild* content = ContentChild::GetSingleton();
-    MOZ_ASSERT(content);
-
-    auto actor = static_cast<URLClassifierChild*>(
-        content->AllocPURLClassifierChild(IPC::Principal(aPrincipal), aResult));
-    MOZ_ASSERT(actor);
-
-    if (aEventTarget) {
-      content->SetEventTargetForActor(actor, aEventTarget);
-    } else {
-      // In the case null event target we should use systemgroup event target
-      NS_WARNING(
-          ("Null event target, we should use SystemGroup to do labelling"));
-      nsCOMPtr<nsISerialEventTarget> systemGroupEventTarget =
-          mozilla::SystemGroup::EventTargetFor(mozilla::TaskCategory::Other);
-      content->SetEventTargetForActor(actor, systemGroupEventTarget);
-    }
-    if (!content->SendPURLClassifierConstructor(
-            actor, IPC::Principal(aPrincipal), aResult)) {
-      *aResult = false;
-      return NS_ERROR_FAILURE;
-    }
-
-    actor->SetCallback(c);
-    return NS_OK;
-  }
-
-  NS_ENSURE_TRUE(gDbBackgroundThread, NS_ERROR_NOT_INITIALIZED);
-
-  nsCOMPtr<nsIPermissionManager> permissionManager =
-      services::GetPermissionManager();
-  if (NS_WARN_IF(!permissionManager)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  uint32_t perm;
-  nsresult rv = permissionManager->TestPermissionFromPrincipal(
-      aPrincipal, NS_LITERAL_CSTRING("safe-browsing"), &perm);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (perm == nsIPermissionManager::ALLOW_ACTION) {
-    *aResult = false;
-    return NS_OK;
-  }
-
-  nsTArray<RefPtr<nsIUrlClassifierFeature>> features;
-  mozilla::net::UrlClassifierFeatureFactory::GetPhishingProtectionFeatures(
-      features);
-  if (features.IsEmpty()) {
-    *aResult = false;
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIURI> uri;
-  rv = aPrincipal->GetURI(getter_AddRefs(uri));
-  NS_ENSURE_SUCCESS(rv, rv);
-  NS_ENSURE_TRUE(uri, NS_ERROR_FAILURE);
-
-  // Let's keep the features alive and release them on the correct thread.
-  RefPtr<FeatureHolder> holder =
-      FeatureHolder::Create(uri, features, nsIUrlClassifierFeature::blacklist);
-  if (NS_WARN_IF(!holder)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  uri = NS_GetInnermostURI(uri);
-  NS_ENSURE_TRUE(uri, NS_ERROR_FAILURE);
-
-  nsUrlClassifierUtils* utilsService = nsUrlClassifierUtils::GetInstance();
-  if (NS_WARN_IF(!utilsService)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // Canonicalize the url
-  nsAutoCString key;
-  rv = utilsService->GetKeyForURI(uri, key);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  RefPtr<nsUrlClassifierClassifyCallback> callback =
-      new (fallible) nsUrlClassifierClassifyCallback(c);
-  if (NS_WARN_IF(!callback)) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  // The rest is done async.
-  rv = LookupURI(key, holder, callback);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  *aResult = true;
+  *aResult = false;
   return NS_OK;
 }
 
@@ -2119,7 +2017,7 @@ NS_IMETHODIMP
 nsUrlClassifierDBService::SetHashCompleter(
     const nsACString& tableName, nsIUrlClassifierHashCompleter* completer) {
   if (completer) {
-    mCompleters.Put(tableName, completer);
+    mCompleters.InsertOrUpdate(tableName, completer);
   } else {
     mCompleters.Remove(tableName);
   }

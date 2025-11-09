@@ -115,26 +115,12 @@ var UpdateListener = {
   ) {
     let action = {
       callback(win, fromDoorhanger) {
-        if (fromDoorhanger) {
-          Services.telemetry
-            .getHistogramById("UPDATE_NOTIFICATION_MAIN_ACTION_DOORHANGER")
-            .add(type);
-        } else {
-          Services.telemetry
-            .getHistogramById("UPDATE_NOTIFICATION_MAIN_ACTION_MENU")
-            .add(type);
-        }
         mainAction(win);
       },
       dismiss: mainActionDismiss,
     };
 
     let secondaryAction = {
-      callback() {
-        Services.telemetry
-          .getHistogramById("UPDATE_NOTIFICATION_DISMISSED")
-          .add(type);
-      },
       dismiss: true,
     };
 
@@ -144,15 +130,6 @@ var UpdateListener = {
       secondaryAction,
       { dismissed, beforeShowDoorhanger }
     );
-    if (dismissed) {
-      Services.telemetry
-        .getHistogramById("UPDATE_NOTIFICATION_BADGE_SHOWN")
-        .add(type);
-    } else {
-      Services.telemetry
-        .getHistogramById("UPDATE_NOTIFICATION_SHOWN")
-        .add(type);
-    }
   },
 
   showRestartNotification(dismissed) {

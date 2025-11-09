@@ -43,7 +43,7 @@ nsHangDetails::GetProcess(nsACString& aName) {
 }
 
 NS_IMETHODIMP
-nsHangDetails::GetRemoteType(nsAString& aName) {
+nsHangDetails::GetRemoteType(nsACString& aName) {
   aName.Assign(mDetails.remoteType());
   return NS_OK;
 }

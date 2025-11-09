@@ -17,7 +17,6 @@
 #include "mozilla/StaticPtr.h"
 #include "mozilla/Unused.h"
 #include "nsClassHashtable.h"
-#include "nsDataHashtable.h"
 #include "nsHashKeys.h"
 #include "nsIObserverService.h"
 #include "nsITelemetry.h"
@@ -30,11 +29,13 @@
 #include "TelemetryEventData.h"
 #include "TelemetryScalar.h"
 
+using mozilla::MakeUnique;
 using mozilla::Maybe;
 using mozilla::StaticAutoPtr;
 using mozilla::StaticMutex;
 using mozilla::StaticMutexAutoLock;
 using mozilla::TimeStamp;
+using mozilla::UniquePtr;
 using mozilla::Telemetry::ChildEventData;
 using mozilla::Telemetry::EventExtraEntry;
 using mozilla::Telemetry::LABELS_TELEMETRY_EVENT_RECORDING_ERROR;
@@ -368,23 +369,14 @@ bool IsExpired(const EventKey& key) { return key.id == kExpiredEventId; }
 EventRecordArray* GetEventRecordsForProcess(const StaticMutexAutoLock& lock,
                                             ProcessID processType,
                                             const EventKey& eventKey) {
-  EventRecordArray* eventRecords = nullptr;
-  if (!gEventRecords.Get(uint32_t(processType), &eventRecords)) {
-    eventRecords = new EventRecordArray();
-    gEventRecords.Put(uint32_t(processType), eventRecords);
-  }
-  return eventRecords;
+  return gEventRecords.GetOrInsertNew(uint32_t(processType));
 }
 
 EventKey* GetEventKey(const StaticMutexAutoLock& lock,
                       const nsACString& category, const nsACString& method,
                       const nsACString& object) {
-  EventKey* event;
   const nsCString& name = UniqueEventName(category, method, object);
-  if (!gEventNameIDMap.Get(name, &event)) {
-    return nullptr;
-  }
-  return event;
+  return gEventNameIDMap.Get(name);
 }
 
 static bool CheckExtraKeysValid(const EventKey& eventKey,
@@ -541,7 +533,8 @@ void RegisterEvents(const StaticMutexAutoLock& lock, const nsACString& category,
     gDynamicEventInfo->AppendElement(eventInfos[i]);
     uint32_t eventId =
         eventExpired[i] ? kExpiredEventId : gDynamicEventInfo->Length() - 1;
-    gEventNameIDMap.Put(eventName, new EventKey{eventId, true});
+    gEventNameIDMap.InsertOrUpdate(
+        eventName, UniquePtr<EventKey>{new EventKey{eventId, true}});
   }
 
   // If it is a builtin, add the category name in order to enable it later.
@@ -710,7 +703,9 @@ void TelemetryEvent::InitializeGlobalState(bool aCanRecordBase,
       eventId = kExpiredEventId;
     }
 
-    gEventNameIDMap.Put(UniqueEventName(info), new EventKey{eventId, false});
+    gEventNameIDMap.InsertOrUpdate(
+        UniqueEventName(info),
+        UniquePtr<EventKey>{new EventKey{eventId, false}});
     gCategoryNames.PutEntry(info.common_info.category());
   }
 
@@ -1251,8 +1246,8 @@ nsresult TelemetryEvent::CreateSnapshots(uint32_t aDataset, bool aClear,
     auto snapshotter = [aDataset, &locker, &processEvents, &leftovers, aClear,
                         optional_argc,
                         aEventLimit](EventRecordsMapType& aProcessStorage) {
-      for (auto iter = aProcessStorage.Iter(); !iter.Done(); iter.Next()) {
-        const EventRecordArray* eventStorage = iter.UserData();
+      for (const auto& entry : aProcessStorage) {
+        const EventRecordArray* eventStorage = entry.GetWeak();
         EventRecordArray events;
         EventRecordArray leftoverEvents;
 
@@ -1271,12 +1266,11 @@ nsresult TelemetryEvent::CreateSnapshots(uint32_t aDataset, bool aClear,
         }
 
         if (events.Length()) {
-          const char* processName = GetNameForProcessID(ProcessID(iter.Key()));
-          processEvents.AppendElement(
-              std::make_pair(processName, std::move(events)));
+          const char* processName =
+              GetNameForProcessID(ProcessID(entry.GetKey()));
+          processEvents.EmplaceBack(processName, std::move(events));
           if (leftoverEvents.Length()) {
-            leftovers.AppendElement(
-                std::make_pair(iter.Key(), std::move(leftoverEvents)));
+            leftovers.EmplaceBack(entry.GetKey(), std::move(leftoverEvents));
           }
         }
       }
@@ -1287,8 +1281,8 @@ nsresult TelemetryEvent::CreateSnapshots(uint32_t aDataset, bool aClear,
     if (aClear) {
       gEventRecords.Clear();
       for (auto pair : leftovers) {
-        gEventRecords.Put(pair.first,
-                          new EventRecordArray(std::move(pair.second)));
+        gEventRecords.InsertOrUpdate(
+            pair.first, MakeUnique<EventRecordArray>(std::move(pair.second)));
       }
       leftovers.Clear();
     }
@@ -1359,7 +1353,7 @@ size_t TelemetryEvent::SizeOfIncludingThis(
 
   auto getSizeOfRecords = [aMallocSizeOf](auto& storageMap) {
     size_t partial = storageMap.ShallowSizeOfExcludingThis(aMallocSizeOf);
-    for (auto iter = storageMap.Iter(); !iter.Done(); iter.Next()) {
+    for (auto iter = storageMap.ConstIter(); !iter.Done(); iter.Next()) {
       EventRecordArray* eventRecords = iter.UserData();
       partial += eventRecords->ShallowSizeOfIncludingThis(aMallocSizeOf);
 

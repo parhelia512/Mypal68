@@ -11,9 +11,6 @@ const { ActorManagerParent } = ChromeUtils.import(
 const { ExtensionUtils } = ChromeUtils.import(
   "resource://gre/modules/ExtensionUtils.jsm"
 );
-const { XPCOMUtils } = ChromeUtils.import(
-  "resource://gre/modules/XPCOMUtils.jsm"
-);
 
 // Windowless browsers can create documents that rely on XUL Custom Elements:
 ChromeUtils.import("resource://gre/modules/CustomElementsListener.jsm", null);
@@ -50,6 +47,11 @@ ChromeUtils.defineModuleGetter(
 );
 ChromeUtils.defineModuleGetter(
   this,
+  "Management",
+  "resource://gre/modules/Extension.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
   "Schemas",
   "resource://gre/modules/Schemas.jsm"
 );
@@ -63,14 +65,6 @@ ChromeUtils.defineModuleGetter(
   "TestUtils",
   "resource://testing-common/TestUtils.jsm"
 );
-
-XPCOMUtils.defineLazyGetter(this, "Management", () => {
-  const { Management } = ChromeUtils.import(
-    "resource://gre/modules/Extension.jsm",
-    null
-  );
-  return Management;
-});
 
 Services.mm.loadFrameScript(
   "chrome://global/content/browser-content.js",
@@ -140,8 +134,8 @@ function promiseBrowserLoaded(browser, url, redirectUrl) {
   return new Promise(resolve => {
     const listener = {
       QueryInterface: ChromeUtils.generateQI([
-        Ci.nsISupportsWeakReference,
-        Ci.nsIWebProgressListener,
+        "nsISupportsWeakReference",
+        "nsIWebProgressListener",
       ]),
 
       onStateChange(webProgress, request, stateFlags, statusCode) {
@@ -243,7 +237,12 @@ class ContentPage {
 
     chromeDoc.documentElement.appendChild(browser);
 
+    // Forcibly flush layout so that we get a pres shell soon enough, see
+    // bug 1274775.
+    browser.getBoundingClientRect();
+
     await awaitFrameLoader;
+
     this.browser = browser;
 
     this.loadFrameScript(frameScript);
@@ -869,7 +868,7 @@ var ExtensionTestUtils = {
         return null;
       },
 
-      QueryInterface: ChromeUtils.generateQI([Ci.nsIDirectoryServiceProvider]),
+      QueryInterface: ChromeUtils.generateQI(["nsIDirectoryServiceProvider"]),
     };
     Services.dirsvc.registerProvider(dirProvider);
 

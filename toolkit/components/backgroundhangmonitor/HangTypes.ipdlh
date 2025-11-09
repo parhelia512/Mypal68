@@ -83,7 +83,7 @@ struct HangDetails
 {
     TimeDuration duration;
     nsCString process;
-    nsString remoteType;
+    nsCString remoteType;
     nsCString threadName;
     nsCString runnableName;
     HangStack stack;

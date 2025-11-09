@@ -169,22 +169,22 @@ void SetupPrefixMap(const _PrefixArray& array, PrefixStringMap& map) {
 
   // The resulting map entries will be a concatenation of all
   // prefix data for the prefixes of a given size.
-  for (auto iter = table.Iter(); !iter.Done(); iter.Next()) {
-    uint32_t size = iter.Key();
-    uint32_t count = iter.Data()->Length();
+  for (const auto& entry : table) {
+    uint32_t size = entry.GetKey();
+    uint32_t count = entry.GetData()->Length();
 
-    _Prefix* str = new _Prefix();
+    auto str = MakeUnique<_Prefix>();
     str->SetLength(size * count);
 
     char* dst = str->BeginWriting();
 
-    iter.Data()->Sort();
+    entry.GetData()->Sort();
     for (uint32_t i = 0; i < count; i++) {
-      memcpy(dst, iter.Data()->ElementAt(i).get(), size);
+      memcpy(dst, entry.GetData()->ElementAt(i).get(), size);
       dst += size;
     }
 
-    map.Put(size, str);
+    map.InsertOrUpdate(size, std::move(str));
   }
 }
 
@@ -195,9 +195,9 @@ void CheckContent(LookupCacheV4* cache, const _PrefixArray& array) {
   PrefixStringMap expected;
   SetupPrefixMap(array, expected);
 
-  for (auto iter = vlPSetMap.Iter(); !iter.Done(); iter.Next()) {
-    nsCString* expectedPrefix = expected.Get(iter.Key());
-    nsCString* resultPrefix = iter.UserData();
+  for (const auto& entry : vlPSetMap) {
+    nsCString* expectedPrefix = expected.Get(entry.GetKey());
+    nsCString* resultPrefix = entry.GetWeak();
 
     ASSERT_TRUE(resultPrefix->Equals(*expectedPrefix));
   }

@@ -22,7 +22,6 @@ EXTRA_JS_MODULES += [
     'UpdateListener.jsm',
     'UpdateService.jsm',
     'UpdateServiceStub.jsm',
-    'UpdateTelemetry.jsm',
 ]
 
 XPCOM_MANIFESTS += [

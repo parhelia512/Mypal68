@@ -403,7 +403,7 @@ var PlacesTestUtils = Object.freeze({
         {
           get: (target, name) => {
             if (name == "QueryInterface") {
-              return ChromeUtils.generateQI([Ci.nsINavBookmarkObserver]);
+              return ChromeUtils.generateQI(["nsINavBookmarkObserver"]);
             }
             if (name == notification) {
               return (...args) => {

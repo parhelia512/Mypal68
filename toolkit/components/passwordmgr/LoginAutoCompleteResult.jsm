@@ -301,8 +301,8 @@ function LoginAutoCompleteResult(
 
 LoginAutoCompleteResult.prototype = {
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIAutoCompleteResult,
-    Ci.nsISupportsWeakReference,
+    "nsIAutoCompleteResult",
+    "nsISupportsWeakReference",
   ]),
 
   /**
@@ -385,7 +385,7 @@ LoginAutoCompleteResult.prototype = {
 function LoginAutoComplete() {}
 LoginAutoComplete.prototype = {
   classID: Components.ID("{2bdac17c-53f1-4896-a521-682ccdeef3a8}"),
-  QueryInterface: ChromeUtils.generateQI([Ci.nsILoginAutoCompleteSearch]),
+  QueryInterface: ChromeUtils.generateQI(["nsILoginAutoCompleteSearch"]),
 
   _autoCompleteLookupPromise: null,
 

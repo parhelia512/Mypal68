@@ -10,6 +10,7 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/EndianUtils.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
 #include <algorithm>
 
@@ -99,13 +100,14 @@ nsresult VariableLengthPrefixSet::SetPrefixes(PrefixStringMap& aPrefixMap) {
   }
 
   // 5~32 bytes prefixes are stored in mVLPrefixSet.
-  for (auto iter = aPrefixMap.ConstIter(); !iter.Done(); iter.Next()) {
+  for (const auto& entry : aPrefixMap) {
     // Skip 4bytes prefixes because it is already stored in mFixedPrefixSet.
-    if (iter.Key() == PREFIX_SIZE_FIXED) {
+    if (entry.GetKey() == PREFIX_SIZE_FIXED) {
       continue;
     }
 
-    mVLPrefixSet.Put(iter.Key(), new nsCString(*iter.Data()));
+    mVLPrefixSet.InsertOrUpdate(entry.GetKey(),
+                                MakeUnique<nsCString>(*entry.GetData()));
   }
 
   return NS_OK;
@@ -121,7 +123,7 @@ nsresult VariableLengthPrefixSet::GetPrefixes(PrefixStringMap& aPrefixMap) {
 
   size_t count = array.Length();
   if (count) {
-    nsCString* prefixes = new nsCString();
+    UniquePtr<nsCString> prefixes(new nsCString());
     if (!prefixes->SetLength(PREFIX_SIZE_FIXED * count, fallible)) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -132,12 +134,13 @@ nsresult VariableLengthPrefixSet::GetPrefixes(PrefixStringMap& aPrefixMap) {
       begin[i] = NativeEndian::swapToBigEndian(array[i]);
     }
 
-    aPrefixMap.Put(PREFIX_SIZE_FIXED, prefixes);
+    aPrefixMap.InsertOrUpdate(PREFIX_SIZE_FIXED, std::move(prefixes));
   }
 
   // Copy variable-length prefix set
-  for (auto iter = mVLPrefixSet.ConstIter(); !iter.Done(); iter.Next()) {
-    aPrefixMap.Put(iter.Key(), new nsCString(*iter.Data()));
+  for (const auto& entry : mVLPrefixSet) {
+    aPrefixMap.InsertOrUpdate(entry.GetKey(),
+                              MakeUnique<nsCString>(*entry.GetData()));
   }
 
   return NS_OK;
@@ -175,9 +178,9 @@ nsresult VariableLengthPrefixSet::Matches(const nsACString& aFullHash,
     return NS_OK;
   }
 
-  for (auto iter = mVLPrefixSet.ConstIter(); !iter.Done(); iter.Next()) {
-    if (BinarySearch(aFullHash, *iter.Data(), iter.Key())) {
-      *aLength = iter.Key();
+  for (const auto& entry : mVLPrefixSet) {
+    if (BinarySearch(aFullHash, *entry.GetData(), entry.GetKey())) {
+      *aLength = entry.GetKey();
       MOZ_ASSERT(*aLength > 4);
       return NS_OK;
     }
@@ -244,7 +247,7 @@ nsresult VariableLengthPrefixSet::LoadPrefixes(nsCOMPtr<nsIInputStream>& in) {
     NS_ENSURE_TRUE(stringLength % prefixSize == 0, NS_ERROR_FILE_CORRUPTED);
     uint32_t prefixCount = stringLength / prefixSize;
 
-    nsCString* vlPrefixes = new nsCString();
+    UniquePtr<nsCString> vlPrefixes(new nsCString());
     if (!vlPrefixes->SetLength(stringLength, fallible)) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -254,7 +257,7 @@ nsresult VariableLengthPrefixSet::LoadPrefixes(nsCOMPtr<nsIInputStream>& in) {
     NS_ENSURE_SUCCESS(rv, rv);
     NS_ENSURE_TRUE(read == stringLength, NS_ERROR_FAILURE);
 
-    mVLPrefixSet.Put(prefixSize, vlPrefixes);
+    mVLPrefixSet.InsertOrUpdate(prefixSize, std::move(vlPrefixes));
     totalPrefixes += prefixCount;
     LOG(("[%s] Loaded %u %u-byte prefixes", mName.get(), prefixCount,
          prefixSize));
@@ -307,10 +310,10 @@ nsresult VariableLengthPrefixSet::WritePrefixes(
   NS_ENSURE_TRUE(written == writelen, NS_ERROR_FAILURE);
 
   // Store PrefixSize, Length of Prefix String and then Prefix String
-  for (auto iter = mVLPrefixSet.ConstIter(); !iter.Done(); iter.Next()) {
-    const nsCString& vlPrefixes = *iter.Data();
+  for (const auto& entry : mVLPrefixSet) {
+    const nsCString& vlPrefixes = *entry.GetData();
 
-    uint8_t prefixSize = iter.Key();
+    uint8_t prefixSize = entry.GetKey();
     writelen = sizeof(uint8_t);
     rv = out->Write(reinterpret_cast<char*>(&prefixSize), writelen, &written);
     NS_ENSURE_SUCCESS(rv, rv);

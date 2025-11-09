@@ -20,8 +20,8 @@ function Prompter() {
 Prompter.prototype = {
   classID: Components.ID("{1c978d25-b37f-43a8-a2d6-0c7a239ead87}"),
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIPromptFactory,
-    Ci.nsIPromptService,
+    "nsIPromptFactory",
+    "nsIPromptService",
   ]),
 
   /* ----------  private members  ---------- */
@@ -650,10 +650,10 @@ ModalPrompter.prototype = {
   allowTabModal: false,
 
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIPrompt,
-    Ci.nsIAuthPrompt,
-    Ci.nsIAuthPrompt2,
-    Ci.nsIWritablePropertyBag2,
+    "nsIPrompt",
+    "nsIAuthPrompt",
+    "nsIAuthPrompt2",
+    "nsIWritablePropertyBag2",
   ]),
 
   /* ---------- internal methods ---------- */
@@ -1090,7 +1090,7 @@ ModalPrompter.prototype = {
 function AuthPromptAdapterFactory() {}
 AuthPromptAdapterFactory.prototype = {
   classID: Components.ID("{6e134924-6c3a-4d86-81ac-69432dd971dc}"),
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIAuthPromptAdapterFactory]),
+  QueryInterface: ChromeUtils.generateQI(["nsIAuthPromptAdapterFactory"]),
 
   /* ----------  nsIAuthPromptAdapterFactory ---------- */
 
@@ -1104,7 +1104,7 @@ function AuthPromptAdapter(oldPrompter) {
   this.oldPrompter = oldPrompter;
 }
 AuthPromptAdapter.prototype = {
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIAuthPrompt2]),
+  QueryInterface: ChromeUtils.generateQI(["nsIAuthPrompt2"]),
   oldPrompter: null,
 
   /* ----------  nsIAuthPrompt2 ---------- */

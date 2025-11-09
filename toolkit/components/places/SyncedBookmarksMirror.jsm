@@ -575,11 +575,7 @@ class SyncedBookmarksMirror {
           signal.removeEventListener("abort", onAbort);
           switch (code) {
             case Cr.NS_ERROR_STORAGE_BUSY:
-              reject(
-                new SyncedBookmarksMirror.MergeConflictError(
-                  "Local tree changed during merge"
-                )
-              );
+              reject(new SyncedBookmarksMirror.MergeConflictError(message));
               break;
 
             case Cr.NS_ERROR_ABORT:
