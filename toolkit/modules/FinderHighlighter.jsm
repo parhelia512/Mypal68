@@ -185,8 +185,7 @@ FinderHighlighter.prototype = {
       return this._iterator;
     }
     this._iterator = ChromeUtils.import(
-      "resource://gre/modules/FinderIterator.jsm",
-      null
+      "resource://gre/modules/FinderIterator.jsm"
     ).FinderIterator;
     return this._iterator;
   },
